@@ -1,0 +1,95 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# OmniWeave — Cloud Build Configuration
+# 
+# Automates the full deployment pipeline:
+#   Step 1: Build & push ADK server container
+#   Step 2: Deploy to Cloud Run
+#   Step 3: Build frontend
+#   Step 4: Deploy to Firebase Hosting
+#
+# Trigger: Push to main branch, or run manually:
+#   gcloud builds submit --config cloudbuild.yaml .
+#
+# Required substitutions (set in trigger or command line):
+#   _REGION: Cloud Run region (default: us-central1)
+#   _SERVICE_NAME: Cloud Run service name (default: omniweave-adk)
+# ─────────────────────────────────────────────────────────────────────────────
+
+steps:
+  # Step 1: Build the ADK server container
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/omniweave/${_SERVICE_NAME}:$COMMIT_SHA'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/omniweave/${_SERVICE_NAME}:latest'
+      - './server'
+    id: 'build-server'
+
+  # Step 2: Push container to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/omniweave/${_SERVICE_NAME}'
+    id: 'push-server'
+    waitFor: ['build-server']
+
+  # Step 3: Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE_NAME}'
+      - '--image'
+      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/omniweave/${_SERVICE_NAME}:$COMMIT_SHA'
+      - '--region'
+      - '${_REGION}'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '8080'
+      - '--memory'
+      - '1Gi'
+      - '--cpu'
+      - '1'
+    id: 'deploy-cloudrun'
+    waitFor: ['push-server']
+
+  # Step 4: Install frontend dependencies
+  - name: 'node:22'
+    entrypoint: 'npm'
+    args: ['install']
+    id: 'install-deps'
+
+  # Step 5: Build frontend
+  - name: 'node:22'
+    entrypoint: 'npm'
+    args: ['run', 'build']
+    id: 'build-frontend'
+    waitFor: ['install-deps']
+
+  # Step 6: Deploy frontend to Firebase Hosting
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        npm install -g firebase-tools
+        firebase deploy --only hosting --project $PROJECT_ID
+    id: 'deploy-hosting'
+    waitFor: ['build-frontend']
+
+substitutions:
+  _REGION: 'us-central1'
+  _SERVICE_NAME: 'omniweave-adk'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+images:
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/omniweave/${_SERVICE_NAME}:$COMMIT_SHA'
+  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/omniweave/${_SERVICE_NAME}:latest'

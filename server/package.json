@@ -1,0 +1,29 @@
+{
+  "name": "omniweave-adk-server",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "agent.ts",
+  "scripts": {
+    "dev": "npx tsx server.ts",
+    "start": "node dist/server.js",
+    "build": "npx tsc",
+    "adk:web": "npx @google/adk-devtools web .",
+    "adk:run": "npx @google/adk-devtools run ."
+  },
+  "dependencies": {
+    "@google/adk": "^0.2.0",
+    "@google/genai": "^1.29.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^4.21.2",
+    "zod": "^3.24.0"
+  },
+  "devDependencies": {
+    "@google/adk-devtools": "^0.2.0",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.14.0",
+    "tsx": "^4.21.0",
+    "typescript": "~5.8.2"
+  }
+}
