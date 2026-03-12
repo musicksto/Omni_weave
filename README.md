@@ -35,7 +35,7 @@ All four modalities are orchestrated by a multi-agent system built with **Google
 ### Multi-Agent System (Google ADK for TypeScript)
 
 ```
-OmniWeaveDirector (Root LlmAgent — gemini-2.5-flash)
+OmniWeaveDirector (Root LlmAgent — gemini-3-flash-preview)
 │
 ├── Sub-Agents:
 │   └── StoryPipeline (SequentialAgent)
@@ -49,11 +49,12 @@ OmniWeaveDirector (Root LlmAgent — gemini-2.5-flash)
     └── generate_music     → Lyria RealTime (ambient background music)
 ```
 
-### Gemini Models (5)
+### Gemini Models (6)
 
 | Model | Purpose |
 |-------|---------|
-| `gemini-2.5-flash` | Agent reasoning, story writing, story reviewing |
+| `gemini-3.1-pro-preview` | Story generation and creative writing |
+| `gemini-3-flash-preview` | Agent reasoning, story writing, story reviewing |
 | `gemini-3.1-flash-image-preview` | 1K resolution image generation (16:9) |
 | `gemini-2.5-flash-preview-tts` | Multi-speaker voice narration (streaming) |
 | `gemini-embedding-2-preview` | Multimodal story fingerprints |
@@ -129,7 +130,7 @@ omniweave/
 │   ├── firebase.ts         # Firebase config
 │   └── components/         # Icons, ErrorBoundary
 ├── server/                 # ADK agent backend
-│   ├── agent.ts            # Multi-agent definition (3 agents + 3 tools)
+│   ├── agent.ts            # Multi-agent definition (3 agents + 4 tools)
 │   ├── server.ts           # Express API server
 │   ├── Dockerfile          # Cloud Run container
 │   └── deploy.sh           # Server deployment script
@@ -155,7 +156,7 @@ omniweave/
 
 **Frontend**: React 19, Vite, Tailwind CSS v4, Framer Motion, TypeScript  
 **Backend**: Google ADK for TypeScript (`@google/adk`), Express, Node.js 22  
-**AI**: Google GenAI SDK (`@google/genai`), 5 Gemini models
+**AI**: Google GenAI SDK (`@google/genai`), 6 Gemini models
 **Cloud**: Cloud Run, Firebase Hosting, Cloud Firestore, Firebase Auth, Artifact Registry, Cloud Build
 
 ---

@@ -7,11 +7,12 @@
 OmniWeave uses a multi-agent architecture powered by the Google ADK:
 
 ```
-OmniWeaveDirector (Root Agent — gemini-2.5-flash)
+OmniWeaveDirector (Root Agent — gemini-3-flash-preview)
 ├── Tools:
 │   ├── generate_image    → Gemini 3.1 Flash Image Preview (1K, 16:9)
 │   ├── generate_speech   → Gemini 2.5 Flash TTS (multi-voice)
-│   └── compute_embedding → Gemini Embedding 2 Preview (multimodal)
+│   ├── compute_embedding → Gemini Embedding 2 Preview (multimodal)
+│   └── generate_music    → Lyria RealTime (ambient background music)
 │
 └── Sub-Agents:
     └── StoryPipeline (SequentialAgent)
@@ -19,14 +20,15 @@ OmniWeaveDirector (Root Agent — gemini-2.5-flash)
         └── StoryReviewer  → Polishes and validates consistency
 ```
 
-### Gemini Models Used (4 total)
+### Gemini Models Used (5 on server)
 
 | Model | Purpose |
 |-------|---------|
-| `gemini-2.5-flash` | Director agent, story writer, story reviewer |
+| `gemini-3-flash-preview` | Director agent, story writer, story reviewer |
 | `gemini-3.1-flash-image-preview` | 1K resolution image generation |
 | `gemini-2.5-flash-preview-tts` | Multi-speaker voice narration |
 | `gemini-embedding-2-preview` | Multimodal story fingerprints |
+| `lyria-realtime-exp` | Ambient background music |
 
 ## Quick Start (Local)
 
@@ -73,7 +75,7 @@ chmod +x deploy.sh
 
 - **Cloud Run** — Hosts the ADK agent server
 - **Cloud Firestore** — Stores stories, users, and audio cache (via frontend)
-- **Firebase Authentication** — Google sign-in (via frontend)
+- **Firebase Authentication** — Anonymous auth (via frontend)
 - **Firebase Hosting** — Serves the frontend static assets
 
 ## Tech Stack

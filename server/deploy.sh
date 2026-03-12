@@ -1,19 +1,7 @@
 #!/bin/bash
-# ─────────────────────────────────────────────────────────────────────────────
-# OmniWeave ADK Server — Google Cloud Run Deployment Script
-# 
-# This script automates deployment of the OmniWeave agent backend to 
-# Google Cloud Run, satisfying the hackathon's infrastructure-as-code bonus.
-#
-# Prerequisites:
-#   - gcloud CLI installed and authenticated
-#   - A Google Cloud project with billing enabled
-#   - Artifact Registry API & Cloud Run API enabled
-#
-# Usage:
-#   chmod +x deploy.sh
-#   ./deploy.sh
-# ─────────────────────────────────────────────────────────────────────────────
+# OmniWeave ADK Server — Cloud Run deployment
+# Requires: gcloud CLI authenticated, billing-enabled GCP project
+# Usage: GCP_PROJECT_ID=... ./deploy.sh
 
 set -euo pipefail
 

@@ -1,23 +1,7 @@
 #!/bin/bash
-# ─────────────────────────────────────────────────────────────────────────────
-# OmniWeave — Full Stack Deployment to Google Cloud
-#
-# Deploys:
-#   1. Frontend → Firebase Hosting
-#   2. ADK Agent Server → Google Cloud Run
-#
-# Prerequisites:
-#   - Node.js 20+
-#   - gcloud CLI installed & authenticated
-#   - firebase CLI installed (npm i -g firebase-tools)
-#   - A Google Cloud project with billing enabled
-#
-# Usage:
-#   export GCP_PROJECT_ID="your-project-id"
-#   export GOOGLE_API_KEY="your-gemini-api-key"
-#   chmod +x deploy-all.sh
-#   ./deploy-all.sh
-# ─────────────────────────────────────────────────────────────────────────────
+# OmniWeave — Full stack deployment (Cloud Run + Firebase Hosting)
+# Requires: Node.js 20+, gcloud CLI, firebase CLI
+# Usage: GCP_PROJECT_ID=... GOOGLE_API_KEY=... ./deploy-all.sh
 
 set -euo pipefail
 

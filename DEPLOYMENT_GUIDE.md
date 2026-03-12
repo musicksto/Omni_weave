@@ -74,14 +74,11 @@ firebase deploy --only firestore:rules
 
 ---
 
-## Proof of Deployment (FOR JUDGES)
+## Deployment Verification
 
-The hackathon requires proof that your backend runs on Google Cloud.
-You need ONE of these:
+### Option A: Screen Recording
 
-### Option A: Screen Recording (Recommended)
-
-Record a 30-60 second screen capture showing:
+Record a short screen capture showing:
 
 1. **Google Cloud Console** → Cloud Run → `omniweave-adk` service
    - Shows: service name, region, URL, status "Active"
@@ -103,9 +100,9 @@ Record a 30-60 second screen capture showing:
    - Console → Cloud Run → Logs tab
    - Shows the agent server startup message
 
-### Option B: Code File in Repo
+### Option B: Code Files
 
-Point judges to these files:
+Key infrastructure files:
 - `server/deploy.sh` — Automated Cloud Run deployment script
 - `server/Dockerfile` — Container definition
 - `server/agent.ts` — ADK agent using `@google/adk`
@@ -142,14 +139,12 @@ open https://gen-lang-client-0001923421.web.app
 
 ## Google Cloud Services Checklist
 
-For the submission, confirm you're using:
-
-- [x] **Gemini Models** (4 models via Google GenAI SDK + ADK)
+- [x] **Gemini Models** (6 models via Google GenAI SDK + ADK)
 - [x] **Google GenAI SDK** (`@google/genai` in frontend)
 - [x] **Google ADK** (`@google/adk` in server)
 - [x] **Cloud Run** (ADK agent server)
 - [x] **Cloud Firestore** (stories, users, audio cache)
-- [x] **Firebase Authentication** (Google sign-in)
+- [x] **Firebase Authentication** (anonymous auth)
 - [x] **Firebase Hosting** (frontend static assets)
 - [x] **Artifact Registry** (Docker images)
 - [x] **Cloud Build** (container builds)

@@ -31,9 +31,9 @@ app.get('/', (_req, res) => {
       'Artifact Registry (container images)',
     ],
     geminiModels: [
-      'gemini-2.5-flash (agent reasoning)',
+      'gemini-3-flash-preview (agent reasoning)',
       'gemini-3.1-flash-image-preview (1K image generation)',
-      'gemini-2.5-flash-preview-tts (multi-voice narration)',
+      'gemini-3-flash-preview-preview-tts (multi-voice narration)',
       'gemini-embedding-2-preview (multimodal embeddings)',
       'lyria-realtime-exp (ambient background music)',
     ],
@@ -46,12 +46,12 @@ app.get('/api/agent-info', (_req, res) => {
     rootAgent: {
       name: rootAgent.name,
       description: rootAgent.description,
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3-flash-preview',
       type: 'LlmAgent',
     },
     tools: [
       { name: 'generate_image', model: 'gemini-3.1-flash-image-preview', description: '1K resolution 16:9 image generation' },
-      { name: 'generate_speech', model: 'gemini-2.5-flash-preview-tts', description: 'Multi-speaker voice narration with streaming audio' },
+      { name: 'generate_speech', model: 'gemini-3-flash-preview-preview-tts', description: 'Multi-speaker voice narration with streaming audio' },
       { name: 'compute_embedding', model: 'gemini-embedding-2-preview', description: 'Multimodal story fingerprints for similarity search' },
       { name: 'generate_music', model: 'lyria-realtime-exp', description: 'Ambient background music via Lyria RealTime streaming' },
     ],
@@ -61,8 +61,8 @@ app.get('/api/agent-info', (_req, res) => {
         type: 'SequentialAgent',
         description: 'Write → Review pipeline for story quality',
         subAgents: [
-          { name: 'StoryWriter', type: 'LlmAgent', model: 'gemini-2.5-flash', description: 'Writes cinematic scripts with [IMAGE:] markers' },
-          { name: 'StoryReviewer', type: 'LlmAgent', model: 'gemini-2.5-flash', description: 'Validates speaker labels, image consistency, narrative quality' },
+          { name: 'StoryWriter', type: 'LlmAgent', model: 'gemini-3-flash-preview', description: 'Writes cinematic scripts with [IMAGE:] markers' },
+          { name: 'StoryReviewer', type: 'LlmAgent', model: 'gemini-3-flash-preview', description: 'Validates speaker labels, image consistency, narrative quality' },
         ],
       },
     ],
@@ -71,7 +71,7 @@ app.get('/api/agent-info', (_req, res) => {
       pattern: 'Root agent with SequentialAgent sub-pipeline and FunctionTool integrations',
       agentCount: 3,
       toolCount: 4,
-      modelCount: 5,
+      modelCount: 6,
     },
     hackathon: {
       category: 'Creative Storyteller',

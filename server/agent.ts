@@ -181,7 +181,7 @@ const generateMusicTool = new FunctionTool({
 
 const storyWriterAgent = new LlmAgent({
   name: 'StoryWriter',
-  model: 'gemini-2.5-flash',
+  model: 'gemini-3-flash-preview',
   description: 'Writes rich, cinematic story scripts with image placement markers.',
   instruction: `You are OmniWeave's Story Writer — a master cinematic storyteller.
 
@@ -200,7 +200,7 @@ Output ONLY the story script text. Do not call any tools — the director agent 
 
 const storyReviewerAgent = new LlmAgent({
   name: 'StoryReviewer',
-  model: 'gemini-2.5-flash',
+  model: 'gemini-3-flash-preview',
   description: 'Reviews and polishes the story script for quality and consistency.',
   instruction: `You are OmniWeave's Story Reviewer.
 
@@ -223,7 +223,7 @@ const storyPipeline = new SequentialAgent({
 
 export const rootAgent = new LlmAgent({
   name: 'OmniWeaveDirector',
-  model: 'gemini-2.5-flash',
+  model: 'gemini-3-flash-preview',
   description:
     'The OmniWeave Creative Director. Orchestrates story writing, image generation, ' +
     'multi-voice narration, and embedding computation for a complete multimodal experience.',

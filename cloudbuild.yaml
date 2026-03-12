@@ -1,19 +1,6 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# OmniWeave — Cloud Build Configuration
-# 
-# Automates the full deployment pipeline:
-#   Step 1: Build & push ADK server container
-#   Step 2: Deploy to Cloud Run
-#   Step 3: Build frontend
-#   Step 4: Deploy to Firebase Hosting
-#
-# Trigger: Push to main branch, or run manually:
-#   gcloud builds submit --config cloudbuild.yaml .
-#
-# Required substitutions (set in trigger or command line):
-#   _REGION: Cloud Run region (default: us-central1)
-#   _SERVICE_NAME: Cloud Run service name (default: omniweave-adk)
-# ─────────────────────────────────────────────────────────────────────────────
+# OmniWeave — Cloud Build pipeline
+# Builds ADK server container, deploys to Cloud Run, builds frontend, deploys to Firebase Hosting
+# Usage: gcloud builds submit --config cloudbuild.yaml .
 
 steps:
   # Step 1: Build the ADK server container
