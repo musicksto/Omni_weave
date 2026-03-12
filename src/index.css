@@ -80,6 +80,29 @@ body {
   perspective: 1000px;
 }
 
+/* Ken Burns cinematic pan/zoom effects — makes images feel alive */
+@keyframes kenburns-1 {
+  0% { transform: scale(1) translate(0, 0); }
+  100% { transform: scale(1.15) translate(-3%, -2%); }
+}
+@keyframes kenburns-2 {
+  0% { transform: scale(1) translate(0, 0); }
+  100% { transform: scale(1.15) translate(3%, -2%); }
+}
+@keyframes kenburns-3 {
+  0% { transform: scale(1.15) translate(0, -2%); }
+  100% { transform: scale(1) translate(0, 0); }
+}
+@keyframes kenburns-4 {
+  0% { transform: scale(1) translate(0, 0); }
+  100% { transform: scale(1.12) translate(0, -1%); }
+}
+
+.kenburns-1 { animation: kenburns-1 12s ease-in-out infinite alternate; }
+.kenburns-2 { animation: kenburns-2 14s ease-in-out infinite alternate; }
+.kenburns-3 { animation: kenburns-3 11s ease-in-out infinite alternate; }
+.kenburns-4 { animation: kenburns-4 13s ease-in-out infinite alternate; }
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

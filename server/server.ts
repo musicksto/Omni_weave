@@ -52,6 +52,7 @@ app.get('/api/agent-info', (_req, res) => {
       { name: 'generate_image', model: 'gemini-3.1-flash-image-preview', description: '1K resolution 16:9 image generation' },
       { name: 'generate_speech', model: 'gemini-2.5-flash-preview-tts', description: 'Multi-speaker voice narration with streaming audio' },
       { name: 'compute_embedding', model: 'gemini-embedding-2-preview', description: 'Multimodal story fingerprints for similarity search' },
+      { name: 'generate_music', model: 'lyria-realtime-exp', description: 'Ambient background music via Lyria RealTime streaming' },
     ],
     subAgents: [
       {
@@ -68,8 +69,8 @@ app.get('/api/agent-info', (_req, res) => {
       framework: '@google/adk (Agent Development Kit for TypeScript)',
       pattern: 'Root agent with SequentialAgent sub-pipeline and FunctionTool integrations',
       agentCount: 3,
-      toolCount: 3,
-      modelCount: 4,
+      toolCount: 4,
+      modelCount: 5,
     },
     hackathon: {
       category: 'Creative Storyteller',

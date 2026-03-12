@@ -17,9 +17,10 @@
 OmniWeave takes a single text prompt and produces a complete multimodal story:
 
 1. **Text** — Gemini 3.1 Pro streams a cinematic script with speaker labels and image placement markers
-2. **Images** — Each marker triggers Gemini 3.1 Flash Image to generate a 1K resolution, 16:9 illustration with consistent art style
-3. **Voice** — Gemini 2.5 Flash TTS narrates with distinct character voices, streaming audio in real-time
-4. **Fingerprint** — Gemini Embedding 2 creates a multimodal vector from text + image for similarity-based "More Like This" discovery
+2. **Images** — Each marker triggers Gemini 3.1 Flash Image to generate a 1K resolution, 16:9 illustration with Ken Burns cinematic animation
+3. **Voice** — Gemini 2.5 Flash TTS narrates with gender-aware character voices, streaming audio in real-time
+4. **Music** — Lyria RealTime generates mood-aware ambient background music that plays under narration
+5. **Fingerprint** — Gemini Embedding 2 creates a multimodal vector from text + image for similarity-based "More Like This" discovery
 
 All four modalities are orchestrated by a multi-agent system built with **Google ADK (Agent Development Kit)**.
 
@@ -44,10 +45,11 @@ OmniWeaveDirector (Root LlmAgent — gemini-2.5-flash)
 └── FunctionTools:
     ├── generate_image     → Gemini 3.1 Flash Image Preview (1K, 16:9)
     ├── generate_speech    → Gemini 2.5 Flash TTS (multi-voice streaming)
-    └── compute_embedding  → Gemini Embedding 2 Preview (multimodal vectors)
+    ├── compute_embedding  → Gemini Embedding 2 Preview (multimodal vectors)
+    └── generate_music     → Lyria RealTime (ambient background music)
 ```
 
-### Gemini Models (4)
+### Gemini Models (5)
 
 | Model | Purpose |
 |-------|---------|
@@ -55,6 +57,7 @@ OmniWeaveDirector (Root LlmAgent — gemini-2.5-flash)
 | `gemini-3.1-flash-image-preview` | 1K resolution image generation (16:9) |
 | `gemini-2.5-flash-preview-tts` | Multi-speaker voice narration (streaming) |
 | `gemini-embedding-2-preview` | Multimodal story fingerprints |
+| `lyria-realtime-exp` | Ambient background music (mood-aware) |
 
 ### Google Cloud Services (6)
 
@@ -62,7 +65,7 @@ OmniWeaveDirector (Root LlmAgent — gemini-2.5-flash)
 |---------|-------|
 | **Cloud Run** | ADK agent server backend |
 | **Cloud Firestore** | Stories, users, audio cache |
-| **Firebase Authentication** | Google sign-in |
+| **Firebase Authentication** | Anonymous auth (zero-friction) |
 | **Firebase Hosting** | Frontend static assets |
 | **Artifact Registry** | Docker container images |
 | **Cloud Build** | CI/CD pipeline |
@@ -152,7 +155,7 @@ omniweave/
 
 **Frontend**: React 19, Vite, Tailwind CSS v4, Framer Motion, TypeScript  
 **Backend**: Google ADK for TypeScript (`@google/adk`), Express, Node.js 22  
-**AI**: Google GenAI SDK (`@google/genai`), 4 Gemini models  
+**AI**: Google GenAI SDK (`@google/genai`), 5 Gemini models
 **Cloud**: Cloud Run, Firebase Hosting, Cloud Firestore, Firebase Auth, Artifact Registry, Cloud Build
 
 ---

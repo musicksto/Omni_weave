@@ -4,7 +4,7 @@
 OmniWeave
 
 ## Elevator Pitch
-A multimodal creative director that weaves text, AI-generated images, and multi-voice narration into cinematic stories — powered by Gemini's interleaved output and Google ADK.
+A multimodal creative director that weaves text, AI-generated images, multi-voice narration, and ambient music into cinematic stories — powered by 5 Gemini models and Google ADK.
 
 ---
 
@@ -24,15 +24,19 @@ OmniWeave takes a simple text prompt and produces a complete multimodal story:
 
 1. **Story Generation** — Gemini 3.1 Pro writes a cinematic script with speaker labels and image markers, streaming in real-time.
 
-2. **Image Generation** — Each [IMAGE:] marker triggers Gemini 3.1 Flash Image Preview to generate a 1K resolution, 16:9 illustration. Every image prompt is fully self-contained with art style and character descriptions restated for visual consistency. When the ADK server is connected, image generation routes through Cloud Run, keeping the API key server-side.
+2. **Image Generation** — Each [IMAGE:] marker triggers Gemini 3.1 Flash Image Preview to generate a 1K resolution, 16:9 illustration with Ken Burns cinematic pan/zoom animation. Every image prompt is fully self-contained with art style and character descriptions restated for visual consistency.
 
-3. **Multi-Voice Narration** — Gemini 2.5 Flash TTS reads the script with distinct character voices. The system parses speaker labels, maps characters to voice presets (Zephyr, Kore, Fenrir, Puck, Charon), and chunks dialogue to handle multi-speaker conversations. Audio streams in real-time via WebAudio API.
+3. **Multi-Voice Narration** — Gemini 2.5 Flash TTS reads the script with gender-aware character voices. The system detects character gender from names (50+ name database + suffix heuristics), maps female characters to Kore/Aoede, male to Fenrir/Charon, and narration to Zephyr. Audio streams in real-time via WebAudio API.
 
-4. **Multimodal Fingerprinting** — Gemini Embedding 2 Preview generates a high-dimensional vector from both the text prompt and the lead image together. This powers a "More Like This" similarity search across the user's story library using cosine similarity. When the ADK server is available, embeddings compute through Cloud Run.
+4. **Background Music** — Lyria RealTime generates mood-aware ambient music that plays under narration. The system extracts emotional keywords from the story text and maps them to music prompts (battle → epic orchestral, forest → enchanted ambient, romance → gentle strings).
 
-5. **Story Library** — Users sign in via Firebase Authentication, save stories to Cloud Firestore (images in subcollections to handle size limits), write reviews, and discover similar stories via embedding-based retrieval.
+5. **Multimodal Fingerprinting** — Gemini Embedding 2 Preview generates a high-dimensional vector from both the text prompt and the lead image together. This powers a "More Like This" similarity search across the public story library using cosine similarity.
 
-6. **Presentation Mode** — "Play Full Story" auto-advances through every text segment with narration, creating a continuous, live-feeling cinematic experience.
+6. **Public Library** — Zero-friction anonymous auth lets anyone save stories, write reviews, and discover similar stories. No sign-in required.
+
+7. **Presentation Mode** — "Play Full Story" auto-advances through every text segment with narration and background music, creating a continuous cinematic experience.
+
+8. **Audiobook Export** — Download the full narration as a single WAV file for offline listening.
 
 ### How we built it
 
@@ -40,7 +44,7 @@ OmniWeave takes a simple text prompt and produces a complete multimodal story:
 
 **Backend (ADK Agent Server)**: Built with Google ADK for TypeScript (`@google/adk`). The server implements a multi-agent architecture:
 
-- **OmniWeaveDirector** — Root `LlmAgent` orchestrating the entire creative pipeline with three `FunctionTool` implementations for image generation, text-to-speech, and embedding computation.
+- **OmniWeaveDirector** — Root `LlmAgent` orchestrating the entire creative pipeline with four `FunctionTool` implementations for image generation, text-to-speech, embedding computation, and background music.
 - **StoryPipeline** — `SequentialAgent` chaining two specialized sub-agents:
   - **StoryWriter** — Generates cinematic scripts with image markers
   - **StoryReviewer** — Validates speaker labels, image prompt consistency, and narrative quality
@@ -50,16 +54,17 @@ OmniWeave takes a simple text prompt and produces a complete multimodal story:
 **Google Cloud Services (6)**:
 - Cloud Run — ADK agent server
 - Cloud Firestore — Stories, users, audio cache
-- Firebase Authentication — Google sign-in
+- Firebase Authentication — Anonymous auth (zero-friction)
 - Firebase Hosting — Frontend static assets
 - Artifact Registry — Docker images
 - Cloud Build — CI/CD pipeline
 
-**Gemini Models (4)**:
+**Gemini Models (5)**:
 - `gemini-3.1-pro-preview` / `gemini-2.5-flash` — Story generation and agent reasoning
-- `gemini-3.1-flash-image-preview` — 1K image generation (16:9)
-- `gemini-2.5-flash-preview-tts` — Multi-speaker voice narration
+- `gemini-3.1-flash-image-preview` — 1K image generation (16:9) with Ken Burns animation
+- `gemini-2.5-flash-preview-tts` — Gender-aware multi-speaker voice narration
 - `gemini-embedding-2-preview` — Multimodal story fingerprints
+- `lyria-realtime-exp` — Mood-aware ambient background music
 
 ### Grounding and consistency
 
@@ -103,7 +108,7 @@ OmniWeave takes grounding seriously at multiple levels:
 
 ### Technologies Used
 
-Google ADK for TypeScript, Google GenAI SDK, Gemini 3.1 Pro Preview, Gemini 3.1 Flash Image Preview, Gemini 2.5 Flash TTS, Gemini Embedding 2 Preview, Cloud Run, Cloud Firestore, Firebase Authentication, Firebase Hosting, Artifact Registry, Cloud Build, React 19, Vite, Tailwind CSS v4, Framer Motion, TypeScript, Express.js, Docker
+Google ADK for TypeScript, Google GenAI SDK, Gemini 3.1 Pro Preview, Gemini 3.1 Flash Image Preview, Gemini 2.5 Flash TTS, Gemini Embedding 2 Preview, Lyria RealTime, Cloud Run, Cloud Firestore, Firebase Authentication, Firebase Hosting, Artifact Registry, Cloud Build, React 19, Vite, Tailwind CSS v4, Framer Motion, TypeScript, Express.js, Docker
 
 ### Category
 Creative Storyteller

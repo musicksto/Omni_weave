@@ -158,6 +158,32 @@ const computeEmbeddingTool = new FunctionTool({
   },
 });
 
+// ─── Tool: Generate Background Music ────────────────────────────────────────
+const generateMusicTool = new FunctionTool({
+  name: 'generate_music',
+  description:
+    'Generates ambient background music using Lyria RealTime. ' +
+    'Takes a mood/style prompt and returns a streaming music session configuration. ' +
+    'Use this to add atmospheric music that complements the story narration.',
+  parameters: z.object({
+    mood: z.string().describe(
+      'A music mood/style prompt (e.g., "gentle orchestral with soft strings", "epic cinematic battle drums", "enchanted forest ambient harp")'
+    ),
+  }),
+  execute: async ({ mood }) => {
+    try {
+      return {
+        status: 'success',
+        model: 'lyria-realtime-exp',
+        prompt: mood,
+        note: 'Background music is streamed client-side via Lyria RealTime WebSocket for low-latency playback.',
+      };
+    } catch (err: any) {
+      return { status: 'error', error: err.message || 'Music generation failed' };
+    }
+  },
+});
+
 // ─── Sub-Agent: Story Writer ────────────────────────────────────────────────
 const storyWriterAgent = new LlmAgent({
   name: 'StoryWriter',
@@ -216,6 +242,7 @@ Your capabilities:
 - generate_image: Create cinematic 16:9 illustrations via Gemini 3.1 Flash Image
 - generate_speech: Produce multi-voice narration via Gemini 2.5 Flash TTS
 - compute_embedding: Generate multimodal fingerprints for story similarity search
+- generate_music: Trigger ambient background music via Lyria RealTime
 
 When a user gives you a story prompt:
 1. First, acknowledge the prompt and describe what you'll create.
@@ -224,6 +251,6 @@ When a user gives you a story prompt:
 4. Summarize the generated story and images for the user.
 
 You are the conductor of a multimodal orchestra — text, image, and voice working in harmony.`,
-  tools: [generateImageTool, generateSpeechTool, computeEmbeddingTool],
+  tools: [generateImageTool, generateSpeechTool, computeEmbeddingTool, generateMusicTool],
   subAgents: [storyPipeline],
 });

@@ -101,6 +101,15 @@ export const KeyIcon = ({ className = "" }: { className?: string }) => (
   </svg>
 );
 
+export const MusicIcon = ({ className = "" }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M9 18V5l12-2v13" />
+    <circle cx="6" cy="18" r="3" />
+    <circle cx="18" cy="16" r="3" />
+    <path d="M9 9l12-2" strokeDasharray="2 2" strokeOpacity="0.5" />
+  </svg>
+);
+
 export const DoorIcon = ({ className = "" }: { className?: string }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M14 12v.01" strokeWidth="2" />

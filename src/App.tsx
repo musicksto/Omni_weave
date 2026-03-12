@@ -2,9 +2,9 @@ import { useState, useEffect } from 'react';
 import { GoogleGenAI, Modality } from '@google/genai';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
-import { PlayIcon as Play, StopIcon as Square, SpinnerIcon as Loader2, QuillIcon as Sparkles, ArrowRightIcon as ArrowRight, CheckIcon as CheckCircle2, AlertIcon as AlertCircle, BookIcon as BookOpen, DownloadIcon as Download, BookmarkIcon as Save, LibraryIcon as Library, KeyIcon as LogIn, DoorIcon as LogOut } from './components/Icons';
-import { auth, db, googleProvider } from './firebase';
-import { signInWithPopup, signOut, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { PlayIcon as Play, StopIcon as Square, SpinnerIcon as Loader2, QuillIcon as Sparkles, ArrowRightIcon as ArrowRight, CheckIcon as CheckCircle2, AlertIcon as AlertCircle, BookIcon as BookOpen, DownloadIcon as Download, BookmarkIcon as Save, LibraryIcon as Library, MusicIcon } from './components/Icons';
+import { auth, db } from './firebase';
+import { signInAnonymously, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { collection, addDoc, getDocs, query, where, orderBy, serverTimestamp, doc, setDoc, getDocFromServer, getDoc } from 'firebase/firestore';
 import { checkADKServer, generateImageViaADK, computeEmbeddingViaADK, isADKEnabled, getADKServerURL } from './adkClient';
 
@@ -205,6 +205,69 @@ function cosineSimilarity(a: number[], b: number[]) {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+// ─── Gender-Aware Voice Assignment ──────────────────────────────────────────
+const FEMALE_NAMES = new Set([
+  'elara', 'luna', 'mira', 'aria', 'elena', 'aurora', 'selene', 'freya', 'nyx',
+  'cassandra', 'isolde', 'lyra', 'ophelia', 'persephone', 'andromeda', 'calypso',
+  'artemis', 'athena', 'gaia', 'hera', 'iris', 'juno', 'minerva', 'venus',
+  'alice', 'bella', 'clara', 'diana', 'emma', 'fiona', 'grace', 'hannah',
+  'ivy', 'julia', 'kate', 'lily', 'maya', 'nora', 'olivia', 'rose',
+  'sarah', 'tessa', 'uma', 'vera', 'willow', 'xena', 'yara', 'zara',
+  'anya', 'suki', 'mei', 'yuki', 'sakura', 'amara', 'kira', 'lena',
+]);
+
+const MALE_NAMES = new Set([
+  'kai', 'marcus', 'orion', 'felix', 'atlas', 'cyrus', 'dorian', 'ezra',
+  'griffin', 'hector', 'ivan', 'jasper', 'kael', 'leon', 'miles', 'nero',
+  'oscar', 'phoenix', 'quinn', 'raven', 'silas', 'thane', 'ulric', 'victor',
+  'wyatt', 'xander', 'york', 'zane', 'arthur', 'balthazar', 'cedric',
+  'dante', 'edgar', 'faust', 'gideon', 'harold', 'isaiah', 'james',
+  'karl', 'liam', 'magnus', 'noah', 'oliver', 'peter', 'rex',
+  'stefan', 'thomas', 'uriel', 'vance', 'william', 'xavier',
+]);
+
+const FEMALE_SUFFIXES = ['ella', 'ina', 'ette', 'lyn', 'anne', 'ene', 'issa', 'ita', 'ia'];
+const MALE_SUFFIXES = ['us', 'or', 'ix', 'ius', 'os', 'ard', 'ric', 'mund'];
+
+function guessGender(name: string): 'female' | 'male' | 'unknown' {
+  const lower = name.toLowerCase().trim();
+  if (lower === 'narrator') return 'unknown';
+  if (FEMALE_NAMES.has(lower)) return 'female';
+  if (MALE_NAMES.has(lower)) return 'male';
+  for (const suffix of FEMALE_SUFFIXES) { if (lower.endsWith(suffix)) return 'female'; }
+  for (const suffix of MALE_SUFFIXES) { if (lower.endsWith(suffix)) return 'male'; }
+  if (lower.endsWith('a')) return 'female';
+  return 'unknown';
+}
+
+function assignVoice(name: string, existing: Record<string, string>): string {
+  if (name === 'Narrator') return 'Zephyr';
+  const gender = guessGender(name);
+  const used = new Set(Object.values(existing));
+  const FEMALE_VOICES = ['Kore', 'Aoede'];
+  const MALE_VOICES = ['Fenrir', 'Charon'];
+  if (gender === 'female') return FEMALE_VOICES.find(v => !used.has(v)) || FEMALE_VOICES[0];
+  if (gender === 'male') return MALE_VOICES.find(v => !used.has(v)) || MALE_VOICES[0];
+  return 'Puck';
+}
+
+// ─── Mood-to-Music Prompt Mapping (for Lyria RealTime) ─────────────────────
+function extractMoodPrompt(storyText: string): string {
+  const lower = storyText.toLowerCase();
+  const moods = [
+    { kw: ['battle', 'war', 'fight', 'sword', 'army'], prompt: 'epic orchestral fantasy battle music, dramatic brass and percussion' },
+    { kw: ['dark', 'shadow', 'evil', 'death', 'fear'], prompt: 'dark atmospheric ambient music, mysterious and foreboding, low strings' },
+    { kw: ['love', 'heart', 'kiss', 'romance', 'tender'], prompt: 'romantic gentle piano and strings, warm emotional melody' },
+    { kw: ['space', 'star', 'galaxy', 'planet', 'cosmos'], prompt: 'ethereal space ambient music, synthesizer pads, cosmic atmosphere' },
+    { kw: ['ocean', 'sea', 'water', 'wave', 'underwater'], prompt: 'calm oceanic ambient music, flowing water sounds, gentle piano' },
+    { kw: ['forest', 'tree', 'nature', 'garden', 'wild'], prompt: 'enchanted forest ambient music, gentle flute and harp, nature sounds' },
+    { kw: ['city', 'neon', 'cyberpunk', 'tech', 'robot'], prompt: 'synthwave cyberpunk ambient music, electronic pads and bass' },
+    { kw: ['magic', 'spell', 'wizard', 'enchant', 'mystic'], prompt: 'mystical fantasy ambient music, ethereal vocals and chimes' },
+  ];
+  for (const m of moods) { if (m.kw.some(k => lower.includes(k))) return m.prompt; }
+  return 'gentle cinematic ambient background music, soft strings and piano';
+}
+
 // ─── Gemini API Key Helper (only used as fallback when ADK server unavailable) ───
 function getApiKey(): string | undefined {
   if (typeof window !== 'undefined' && (window as any).process?.env?.API_KEY) return (window as any).process.env.API_KEY;
@@ -240,6 +303,8 @@ export default function App() {
   const [currentPlayIndex, setCurrentPlayIndex] = useState<number>(-1);
   const [review, setReview] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [musicEnabled, setMusicEnabled] = useState(false);
+  const [musicSession, setMusicSession] = useState<any>(null);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -278,12 +343,12 @@ export default function App() {
 
   useEffect(() => {
     const fetchSimilar = async () => {
-      if (!user || !embedding) {
+      if (!embedding) {
         setSimilarStories([]);
         return;
       }
       try {
-        const q = query(collection(db, 'stories'), where('authorId', '==', user.uid));
+        const q = query(collection(db, 'stories'));
         const querySnapshot = await getDocs(q);
         const stories = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
         
@@ -302,7 +367,7 @@ export default function App() {
       }
     };
     fetchSimilar();
-  }, [embedding, user, prompt]);
+  }, [embedding, prompt]);
 
   useEffect(() => {
     async function testConnection() {
@@ -317,46 +382,20 @@ export default function App() {
     testConnection();
 
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) {
+        try { await signInAnonymously(auth); } catch (e) { console.error('Anonymous auth failed:', e); }
+        return;
+      }
       setUser(currentUser);
       setIsAuthReady(true);
-      if (currentUser) {
-        try {
-          const userDocRef = doc(db, 'users', currentUser.uid);
-          const userDoc = await getDocFromServer(userDocRef);
-          if (!userDoc.exists()) {
-            await setDoc(userDocRef, {
-              uid: currentUser.uid,
-              email: currentUser.email,
-              name: currentUser.displayName || 'User',
-              role: 'user',
-              createdAt: serverTimestamp()
-            });
-          } else {
-            await setDoc(userDocRef, {
-              email: currentUser.email,
-              name: currentUser.displayName || 'User',
-            }, { merge: true });
-          }
-        } catch (e) {
-          handleFirestoreError(e, OperationType.WRITE, `users/${currentUser.uid}`);
-        }
-      }
     });
     return () => unsubscribe();
   }, []);
 
-  const handleLogin = async () => {
-    try { await signInWithPopup(auth, googleProvider); } catch (error) { console.error("Login error:", error); }
-  };
-
-  const handleLogout = async () => {
-    try { await signOut(auth); setSavedStories([]); setShowLibrary(false); } catch (error) { console.error("Logout error:", error); }
-  };
-
   const loadLibrary = async () => {
     if (!user) return;
     try {
-      const q = query(collection(db, 'stories'), where('authorId', '==', user.uid), orderBy('createdAt', 'desc'));
+      const q = query(collection(db, 'stories'), orderBy('createdAt', 'desc'));
       const querySnapshot = await getDocs(q);
       const stories = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setSavedStories(stories);
@@ -367,7 +406,7 @@ export default function App() {
   };
 
   const saveToLibrary = async () => {
-    if (!user || storyParts.length === 0) return;
+    if (!user || storyParts.length === 0) { if (!user) showToast('Connecting... try again in a moment'); return; }
     setIsSaving(true);
     try {
       const partsToSave = storyParts.map(part => {
@@ -455,6 +494,57 @@ export default function App() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+
+  const exportAudiobook = () => {
+    const audioParts = storyParts.filter(p => p.type === 'text' && (p as any).audioBase64);
+    if (audioParts.length === 0) { showToast('Play the story first to generate audio'); return; }
+
+    // Decode all base64 PCM chunks
+    const pcmChunks = audioParts.map(p => {
+      const raw = atob((p as any).audioBase64);
+      const bytes = new Uint8Array(raw.length);
+      for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+      return bytes;
+    });
+    const totalLength = pcmChunks.reduce((sum, c) => sum + c.length, 0);
+
+    // Build WAV header (24kHz, 16-bit, mono)
+    const sampleRate = 24000;
+    const numChannels = 1;
+    const bitsPerSample = 16;
+    const header = new ArrayBuffer(44);
+    const view = new DataView(header);
+    const writeStr = (offset: number, str: string) => { for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i)); };
+    writeStr(0, 'RIFF');
+    view.setUint32(4, 36 + totalLength, true);
+    writeStr(8, 'WAVE');
+    writeStr(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * numChannels * (bitsPerSample / 8), true);
+    view.setUint16(32, numChannels * (bitsPerSample / 8), true);
+    view.setUint16(34, bitsPerSample, true);
+    writeStr(36, 'data');
+    view.setUint32(40, totalLength, true);
+
+    const wavBytes = new Uint8Array(44 + totalLength);
+    wavBytes.set(new Uint8Array(header), 0);
+    let offset = 44;
+    for (const chunk of pcmChunks) { wavBytes.set(chunk, offset); offset += chunk.length; }
+
+    const blob = new Blob([wavBytes], { type: 'audio/wav' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${(prompt || 'story').substring(0, 30).replace(/[^a-z0-9]/gi, '_').toLowerCase()}_audiobook.wav`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('Audiobook exported!');
   };
 
   useEffect(() => {
@@ -751,16 +841,16 @@ GROUNDING: Base your story on internally consistent world-building. Character na
 
       if (adkAvailable) addAgentActivity('generate_speech → TTS streaming...');
 
-      // Build voice map
+      // Build voice map — gender-aware assignment
       const currentVoiceMap: Record<string, string> = { 'Narrator': 'Zephyr' };
-      const availableVoices = ['Kore', 'Fenrir', 'Puck', 'Charon'];
-      let voiceIndex = 0;
       const fullText = storyParts.filter(p => p.type === 'text').map(p => (p as any).text).join('\n');
       const speakerRegex = /^\s*(?:\*\*|\*)?([A-Z][a-zA-Z0-9_ ]+)(?:\*\*|\*)?:/gm;
       let match;
       while ((match = speakerRegex.exec(fullText)) !== null) {
         const speaker = match[1].trim();
-        if (!currentVoiceMap[speaker]) { currentVoiceMap[speaker] = availableVoices[voiceIndex % availableVoices.length]; voiceIndex++; }
+        if (!currentVoiceMap[speaker]) {
+          currentVoiceMap[speaker] = assignVoice(speaker, currentVoiceMap);
+        }
       }
 
       // Chunk text for multi-speaker TTS
@@ -858,17 +948,78 @@ GROUNDING: Base your story on internally consistent world-building. Character na
     }
   };
 
+  // ─── Lyria RealTime Background Music ──────────────────────────────────────
+  const startBackgroundMusic = async () => {
+    if (!musicEnabled) return;
+    try {
+      const apiKey = getApiKey();
+      if (!apiKey) return;
+      const ai = new GoogleGenAI({ apiKey: apiKey as string });
+
+      // Extract mood from story text
+      const storyText = storyParts.filter(p => p.type === 'text').map(p => (p as any).text).join('\n');
+      const moodPrompt = extractMoodPrompt(storyText);
+
+      const session = await (ai as any).live.music.connect({
+        model: 'models/lyria-realtime-exp',
+        callbacks: {
+          onAudioData: (data: { data: string }) => {
+            // Stream music through WebAudio at low volume
+            try {
+              const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
+              const raw = atob(data.data);
+              const bytes = new Uint8Array(raw.length);
+              for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+              const float32 = new Float32Array(bytes.length / 2);
+              const dv = new DataView(bytes.buffer);
+              for (let i = 0; i < float32.length; i++) float32[i] = dv.getInt16(i * 2, true) / 32768;
+              const buffer = ctx.createBuffer(1, float32.length, 48000);
+              buffer.getChannelData(0).set(float32);
+              const source = ctx.createBufferSource();
+              source.buffer = buffer;
+              const gainNode = ctx.createGain();
+              gainNode.gain.value = 0.15;
+              source.connect(gainNode).connect(ctx.destination);
+              source.start();
+            } catch { /* silent fallback */ }
+          },
+        },
+      });
+
+      await session.setWeightedPrompts([{ text: moodPrompt, weight: 1.0 }]);
+      await session.play();
+      setMusicSession(session);
+      if (adkAvailable) addAgentActivity('lyria-realtime → Background music streaming');
+    } catch (err) {
+      console.warn('Lyria RealTime not available:', err);
+      // Silently degrade — Lyria may not be enabled for this API key
+    }
+  };
+
+  const stopBackgroundMusic = async () => {
+    if (musicSession) {
+      try { await musicSession.pause(); } catch { /* ignore */ }
+      setMusicSession(null);
+    }
+  };
+
   const startAutoPlay = () => {
     const firstTextPartIndex = storyParts.findIndex(p => p.type === 'text');
     if (firstTextPartIndex !== -1) {
       const firstPart = storyParts[firstTextPartIndex];
-      if (firstPart.type === 'text') { setIsAutoPlaying(true); setCurrentPlayIndex(firstTextPartIndex); playAudio(firstPart.id, firstPart.text, firstTextPartIndex); }
+      if (firstPart.type === 'text') {
+        setIsAutoPlaying(true);
+        setCurrentPlayIndex(firstTextPartIndex);
+        playAudio(firstPart.id, firstPart.text, firstTextPartIndex);
+        startBackgroundMusic();
+      }
     }
   };
 
   const stopAutoPlay = () => {
     setIsAutoPlaying(false);
     setCurrentPlayIndex(-1);
+    stopBackgroundMusic();
     if (activeAudio) { activeAudio.pause(); setActiveAudio(null); setStoryParts(parts => parts.map(p => p.type === 'text' ? { ...p, isPlaying: false } : p)); }
   };
 
@@ -922,18 +1073,7 @@ GROUNDING: Base your story on internally consistent world-building. Character na
           <h1 className="text-xl font-serif tracking-tight">OmniWeave</h1>
         </div>
         <div className="flex items-center gap-4 overflow-x-auto no-scrollbar pb-1 md:pb-0 justify-start md:justify-end w-full md:w-auto">
-          {isAuthReady && (
-            <div className="flex items-center gap-2 mr-4">
-              {user ? (
-                <>
-                  <button onClick={loadLibrary} className="text-xs font-medium text-[#2c2c2c]/80 hover:text-[#2c2c2c] flex items-center gap-1 bg-black/5 px-3 py-1.5 rounded-full transition-colors"><Library className="w-3.5 h-3.5" /> Library</button>
-                  <button onClick={handleLogout} className="text-xs font-medium text-[#2c2c2c]/80 hover:text-[#2c2c2c] flex items-center gap-1 bg-black/5 px-3 py-1.5 rounded-full transition-colors"><LogOut className="w-3.5 h-3.5" /> Sign Out</button>
-                </>
-              ) : (
-                <button onClick={handleLogin} className="text-xs font-medium text-[#f5f5f0] hover:text-white flex items-center gap-1 bg-[#8b2e16]/80 hover:bg-[#8b2e16] px-3 py-1.5 rounded-full transition-colors"><LogIn className="w-3.5 h-3.5" /> Sign In to Save</button>
-              )}
-            </div>
-          )}
+          <button onClick={loadLibrary} className="text-xs font-medium text-[#2c2c2c]/80 hover:text-[#2c2c2c] flex items-center gap-1 bg-black/5 px-3 py-1.5 rounded-full transition-colors mr-4"><Library className="w-3.5 h-3.5" /> Library</button>
           {/* ADK Server Status Badge */}
           <div className={`text-[10px] md:text-xs font-mono px-2.5 md:px-3 py-1 md:py-1.5 rounded-full border flex items-center gap-1 whitespace-nowrap ${
             adkAvailable 
@@ -1066,20 +1206,27 @@ GROUNDING: Base your story on internally consistent world-building. Character na
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-12 flex flex-col md:flex-row justify-between items-center gap-4">
                 <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
                   <button onClick={downloadAsBook} className="px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 bg-black/10 hover:bg-black/20 text-[#2c2c2c] transition-colors whitespace-nowrap text-sm"><BookOpen className="w-4 h-4" /> Download Book</button>
-                  {user && (
-                    <button onClick={saveToLibrary} disabled={isSaving} className="px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 bg-black/10 hover:bg-black/20 text-[#2c2c2c] transition-colors whitespace-nowrap text-sm disabled:opacity-50">
-                      {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
-                    </button>
-                  )}
+                  <button onClick={exportAudiobook} className="px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 bg-black/10 hover:bg-black/20 text-[#2c2c2c] transition-colors whitespace-nowrap text-sm"><Download className="w-4 h-4" /> Audiobook</button>
+                  <button onClick={saveToLibrary} disabled={isSaving} className="px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 bg-black/10 hover:bg-black/20 text-[#2c2c2c] transition-colors whitespace-nowrap text-sm disabled:opacity-50">
+                    {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
+                  </button>
                 </div>
-                <button id="autoplay-btn" onClick={isAutoPlaying ? stopAutoPlay : startAutoPlay}
-                  className={`px-6 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all whitespace-nowrap ${
-                    isAutoPlaying 
-                      ? 'bg-[#8b2e16]/20 text-[#8b2e16] border border-[#8b2e16]/30 hover:bg-[#8b2e16]/30' 
-                      : 'bg-[#8b2e16] text-[#f5f5f0] shadow-[0_0_20px_rgba(139,46,22,0.15)] hover:bg-[#8b2e16]/90'
-                  }`}>
-                  {isAutoPlaying ? (<><Square className="w-4 h-4 fill-current" /> Stop Presentation</>) : (<><Play className="w-4 h-4 fill-current" /> Play Full Story</>)}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setMusicEnabled(e => !e)}
+                    className={`px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all whitespace-nowrap text-sm ${
+                      musicEnabled ? 'bg-[#7c3aed]/20 text-[#7c3aed] border border-[#7c3aed]/30' : 'bg-black/10 hover:bg-black/20 text-[#2c2c2c]'
+                    }`}>
+                    <MusicIcon className="w-4 h-4" /> {musicEnabled ? 'Music On' : 'Music'}
+                  </button>
+                  <button id="autoplay-btn" onClick={isAutoPlaying ? stopAutoPlay : startAutoPlay}
+                    className={`px-6 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all whitespace-nowrap ${
+                      isAutoPlaying
+                        ? 'bg-[#8b2e16]/20 text-[#8b2e16] border border-[#8b2e16]/30 hover:bg-[#8b2e16]/30'
+                        : 'bg-[#8b2e16] text-[#f5f5f0] shadow-[0_0_20px_rgba(139,46,22,0.15)] hover:bg-[#8b2e16]/90'
+                    }`}>
+                    {isAutoPlaying ? (<><Square className="w-4 h-4 fill-current" /> Stop Presentation</>) : (<><Play className="w-4 h-4 fill-current" /> Play Full Story</>)}
+                  </button>
+                </div>
               </motion.div>
             )}
 
@@ -1102,7 +1249,7 @@ GROUNDING: Base your story on internally consistent world-building. Character na
                         </div>
                       ) : (
                         <>
-                          <img src={part.url} alt={`Story illustration ${idx}`} className="w-full h-auto object-cover transform transition-transform duration-1000 group-hover:scale-105" referrerPolicy="no-referrer" />
+                          <img src={part.url} alt={`Story illustration ${idx}`} className={`w-full h-auto object-cover kenburns-${(idx % 4) + 1}`} referrerPolicy="no-referrer" />
                           <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
                         </>
                       )}
@@ -1169,19 +1316,15 @@ GROUNDING: Base your story on internally consistent world-building. Character na
                     className="w-full bg-[#fdfbf7]/80 border border-black/10 rounded-xl p-4 text-[#2c2c2c] placeholder:text-[#2c2c2c]/40 resize-none min-h-[100px] focus:outline-none focus:border-[#8b2e16]/50 transition-colors" maxLength={1000} />
                   <div className="flex justify-between items-center mt-4">
                     <span className="text-xs text-[#2c2c2c]/60 font-mono">{review.length}/1000</span>
-                    {user ? (
-                      <button onClick={saveToLibrary} disabled={isSaving} className="px-6 py-2.5 bg-[#8b2e16] hover:bg-[#8b2e16]/90 text-[#f5f5f0] rounded-xl text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2">
-                        {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save Story & Review
-                      </button>
-                    ) : (
-                      <p className="text-sm text-[#8b2e16] italic">Sign in to save your story and review.</p>
-                    )}
+                    <button onClick={saveToLibrary} disabled={isSaving} className="px-6 py-2.5 bg-[#8b2e16] hover:bg-[#8b2e16]/90 text-[#f5f5f0] rounded-xl text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2">
+                      {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save Story & Review
+                    </button>
                   </div>
                 </div>
 
                 {similarStories.length > 0 && (
                   <div className="w-full max-w-4xl mt-8">
-                    <h3 className="text-xl font-serif text-[#1a1a1a] mb-6 flex items-center gap-2"><Sparkles className="w-5 h-5 text-[#8b2e16]" />More Like This from your Library</h3>
+                    <h3 className="text-xl font-serif text-[#1a1a1a] mb-6 flex items-center gap-2"><Sparkles className="w-5 h-5 text-[#8b2e16]" />More Like This</h3>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       {similarStories.map((story, idx) => (
                         <div key={story.id || idx} onClick={() => loadStory(story)} className="glass-panel p-4 rounded-xl border-black/10 cursor-pointer hover:bg-black/5 transition-colors group">
@@ -1217,16 +1360,17 @@ GROUNDING: Base your story on internally consistent world-building. Character na
                 <div className="pl-3">StoryPipeline <span className="text-[#5a5a40]/60">(SequentialAgent)</span></div>
                 <div className="pl-6">StoryWriter <span className="text-[#2c2c2c]/40">(LlmAgent)</span></div>
                 <div className="pl-6">StoryReviewer <span className="text-[#2c2c2c]/40">(LlmAgent)</span></div>
-                <div className="pl-3 mt-1">3 FunctionTools</div>
+                <div className="pl-3 mt-1">4 FunctionTools</div>
               </div>
             </div>
             <div>
-              <h4 className="font-semibold text-[#2c2c2c]/80 mb-3 text-sm">Gemini Models (4)</h4>
+              <h4 className="font-semibold text-[#2c2c2c]/80 mb-3 text-sm">Gemini Models (5)</h4>
               <div className="font-mono space-y-1">
                 <div><span className="inline-block w-2 h-2 rounded-full bg-[#8b2e16] mr-1.5" />gemini-3.1-pro-preview</div>
                 <div><span className="inline-block w-2 h-2 rounded-full bg-[#d97706] mr-1.5" />gemini-3.1-flash-image</div>
                 <div><span className="inline-block w-2 h-2 rounded-full bg-[#059669] mr-1.5" />gemini-2.5-flash-tts</div>
                 <div><span className="inline-block w-2 h-2 rounded-full bg-[#7c3aed] mr-1.5" />gemini-embedding-2</div>
+                <div><span className="inline-block w-2 h-2 rounded-full bg-[#ec4899] mr-1.5" />lyria-realtime-exp</div>
               </div>
             </div>
             <div>
@@ -1235,7 +1379,7 @@ GROUNDING: Base your story on internally consistent world-building. Character na
                 <div>Cloud Run &middot; ADK server</div>
                 <div>Firebase Hosting &middot; Frontend</div>
                 <div>Cloud Firestore &middot; Data</div>
-                <div>Firebase Auth &middot; Google SSO</div>
+                <div>Firebase Auth &middot; Anonymous</div>
                 <div>Artifact Registry &middot; Images</div>
                 <div>Cloud Build &middot; CI/CD</div>
               </div>
