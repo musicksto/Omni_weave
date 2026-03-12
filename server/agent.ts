@@ -200,7 +200,7 @@ Output ONLY the story script text. Do not call any tools — the director agent 
 
 const storyReviewerAgent = new LlmAgent({
   name: 'StoryReviewer',
-  model: 'gemini-3-flash-preview',
+  model: 'gemini-3.1-flash-lite-preview',
   description: 'Reviews and polishes the story script for quality and consistency.',
   instruction: `You are OmniWeave's Story Reviewer.
 

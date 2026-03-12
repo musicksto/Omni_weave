@@ -16,15 +16,16 @@ OmniWeaveDirector (Root Agent — gemini-3-flash-preview)
 │
 └── Sub-Agents:
     └── StoryPipeline (SequentialAgent)
-        ├── StoryWriter   → Writes cinematic scripts with image markers
-        └── StoryReviewer  → Polishes and validates consistency
+        ├── StoryWriter   (gemini-3-flash-preview) → Writes cinematic scripts
+        └── StoryReviewer  (gemini-3.1-flash-lite-preview) → Validates consistency
 ```
 
-### Gemini Models Used (5 on server)
+### Gemini Models Used (6 on server)
 
 | Model | Purpose |
 |-------|---------|
-| `gemini-3-flash-preview` | Director agent, story writer, story reviewer |
+| `gemini-3-flash-preview` | Director agent, story writer |
+| `gemini-3.1-flash-lite-preview` | Story reviewer |
 | `gemini-3.1-flash-image-preview` | 1K resolution image generation |
 | `gemini-2.5-flash-preview-tts` | Multi-speaker voice narration |
 | `gemini-embedding-2-preview` | Multimodal story fingerprints |

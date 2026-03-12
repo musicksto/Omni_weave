@@ -139,7 +139,7 @@ open https://gen-lang-client-0001923421.web.app
 
 ## Google Cloud Services Checklist
 
-- [x] **Gemini Models** (6 models via Google GenAI SDK + ADK)
+- [x] **Gemini Models** (7 models via Google GenAI SDK + ADK)
 - [x] **Google GenAI SDK** (`@google/genai` in frontend)
 - [x] **Google ADK** (`@google/adk` in server)
 - [x] **Cloud Run** (ADK agent server)

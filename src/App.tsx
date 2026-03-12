@@ -1033,7 +1033,7 @@ GROUNDING: Base your story on internally consistent world-building. Character na
             {adkAvailable ? 'ADK Agent Connected' : 'Direct Mode'}
           </div>
           <div className="text-[10px] md:text-xs font-mono text-[#8b2e16]/80 bg-[#fdfbf7]/60 px-2.5 md:px-3 py-1 md:py-1.5 rounded-full border border-black/5 flex items-center gap-1 whitespace-nowrap">
-            <CheckCircle2 className="w-3 h-3 text-emerald-500" /> 6 Gemini Models
+            <CheckCircle2 className="w-3 h-3 text-emerald-500" /> 7 Gemini Models
           </div>
           <div className="text-[10px] md:text-xs font-mono text-[#8b2e16]/80 bg-[#fdfbf7]/60 px-2.5 md:px-3 py-1 md:py-1.5 rounded-full border border-black/5 flex items-center gap-1 whitespace-nowrap">
             <CheckCircle2 className="w-3 h-3 text-emerald-500" /> Multi-Cast TTS
@@ -1312,10 +1312,11 @@ GROUNDING: Base your story on internally consistent world-building. Character na
               </div>
             </div>
             <div>
-              <h4 className="font-semibold text-[#2c2c2c]/80 mb-3 text-sm">Gemini Models (6)</h4>
+              <h4 className="font-semibold text-[#2c2c2c]/80 mb-3 text-sm">Gemini Models (7)</h4>
               <div className="font-mono space-y-1">
                 <div><span className="inline-block w-2 h-2 rounded-full bg-[#8b2e16] mr-1.5" />gemini-3.1-pro-preview</div>
                 <div><span className="inline-block w-2 h-2 rounded-full bg-[#2563eb] mr-1.5" />gemini-3-flash-preview</div>
+                <div><span className="inline-block w-2 h-2 rounded-full bg-[#0891b2] mr-1.5" />gemini-3.1-flash-lite</div>
                 <div><span className="inline-block w-2 h-2 rounded-full bg-[#d97706] mr-1.5" />gemini-3.1-flash-image</div>
                 <div><span className="inline-block w-2 h-2 rounded-full bg-[#059669] mr-1.5" />gemini-2.5-flash-tts</div>
                 <div><span className="inline-block w-2 h-2 rounded-full bg-[#7c3aed] mr-1.5" />gemini-embedding-2</div>

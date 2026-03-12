@@ -62,7 +62,7 @@ app.get('/api/agent-info', (_req, res) => {
         description: 'Write → Review pipeline for story quality',
         subAgents: [
           { name: 'StoryWriter', type: 'LlmAgent', model: 'gemini-3-flash-preview', description: 'Writes cinematic scripts with [IMAGE:] markers' },
-          { name: 'StoryReviewer', type: 'LlmAgent', model: 'gemini-3-flash-preview', description: 'Validates speaker labels, image consistency, narrative quality' },
+          { name: 'StoryReviewer', type: 'LlmAgent', model: 'gemini-3.1-flash-lite-preview', description: 'Validates speaker labels, image consistency, narrative quality' },
         ],
       },
     ],
@@ -71,7 +71,7 @@ app.get('/api/agent-info', (_req, res) => {
       pattern: 'Root agent with SequentialAgent sub-pipeline and FunctionTool integrations',
       agentCount: 3,
       toolCount: 4,
-      modelCount: 6,
+      modelCount: 7,
     },
     hackathon: {
       category: 'Creative Storyteller',

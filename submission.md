@@ -4,7 +4,7 @@
 OmniWeave
 
 ## Elevator Pitch
-A multimodal creative director that weaves text, AI-generated images, multi-voice narration, and ambient music into cinematic stories — powered by 6 Gemini models and Google ADK.
+A multimodal creative director that weaves text, AI-generated images, multi-voice narration, and ambient music into cinematic stories — powered by 7 Gemini models and Google ADK.
 
 ---
 
@@ -59,9 +59,10 @@ OmniWeave takes a simple text prompt and produces a complete multimodal story:
 - Artifact Registry — Docker images
 - Cloud Build — CI/CD pipeline
 
-**Gemini Models (6)**:
+**Gemini Models (7)**:
 - `gemini-3.1-pro-preview` — Story generation and creative writing
-- `gemini-3-flash-preview` — Agent reasoning, story writing, story reviewing
+- `gemini-3-flash-preview` — Agent reasoning and story writing
+- `gemini-3.1-flash-lite-preview` — Story review and validation
 - `gemini-3.1-flash-image-preview` — 1K image generation (16:9) with Ken Burns animation
 - `gemini-2.5-flash-preview-tts` — Gender-aware multi-speaker voice narration
 - `gemini-embedding-2-preview` — Multimodal story fingerprints
