@@ -3,14 +3,12 @@ import { LlmAgent, SequentialAgent, FunctionTool } from '@google/adk';
 import { GoogleGenAI, Modality } from '@google/genai';
 import { z } from 'zod';
 
-// ─── Gemini Client ──────────────────────────────────────────────────────────
 const getAI = () => {
   const key = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
   if (!key) throw new Error('GOOGLE_API_KEY or GEMINI_API_KEY not set');
   return new GoogleGenAI({ apiKey: key });
 };
 
-// ─── Tool: Generate Image ───────────────────────────────────────────────────
 const generateImageTool = new FunctionTool({
   name: 'generate_image',
   description:
@@ -50,7 +48,6 @@ const generateImageTool = new FunctionTool({
   },
 });
 
-// ─── Tool: Generate Speech (TTS) ───────────────────────────────────────────
 const generateSpeechTool = new FunctionTool({
   name: 'generate_speech',
   description:
@@ -115,7 +112,6 @@ const generateSpeechTool = new FunctionTool({
   },
 });
 
-// ─── Tool: Compute Embedding ────────────────────────────────────────────────
 const computeEmbeddingTool = new FunctionTool({
   name: 'compute_embedding',
   description:
@@ -158,7 +154,6 @@ const computeEmbeddingTool = new FunctionTool({
   },
 });
 
-// ─── Tool: Generate Background Music ────────────────────────────────────────
 const generateMusicTool = new FunctionTool({
   name: 'generate_music',
   description:
@@ -184,7 +179,6 @@ const generateMusicTool = new FunctionTool({
   },
 });
 
-// ─── Sub-Agent: Story Writer ────────────────────────────────────────────────
 const storyWriterAgent = new LlmAgent({
   name: 'StoryWriter',
   model: 'gemini-2.5-flash',
@@ -204,7 +198,6 @@ Output ONLY the story script text. Do not call any tools — the director agent 
   outputKey: 'story_script',
 });
 
-// ─── Sub-Agent: Story Reviewer ──────────────────────────────────────────────
 const storyReviewerAgent = new LlmAgent({
   name: 'StoryReviewer',
   model: 'gemini-2.5-flash',
@@ -222,14 +215,12 @@ Output ONLY the final polished script.`,
   outputKey: 'final_script',
 });
 
-// ─── Pipeline: Story Generation (Sequential) ───────────────────────────────
 const storyPipeline = new SequentialAgent({
   name: 'StoryPipeline',
   description: 'Sequential pipeline: writes a story, then reviews and polishes it.',
   subAgents: [storyWriterAgent, storyReviewerAgent],
 });
 
-// ─── Root Agent: OmniWeave Director ─────────────────────────────────────────
 export const rootAgent = new LlmAgent({
   name: 'OmniWeaveDirector',
   model: 'gemini-2.5-flash',

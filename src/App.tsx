@@ -8,14 +8,6 @@ import { signInAnonymously, onAuthStateChanged, User as FirebaseUser } from 'fir
 import { collection, addDoc, getDocs, query, where, orderBy, serverTimestamp, doc, setDoc, getDocFromServer, getDoc } from 'firebase/firestore';
 import { checkADKServer, generateImageViaADK, computeEmbeddingViaADK, isADKEnabled, getADKServerURL } from './adkClient';
 
-declare global {
-  interface Window {
-    aistudio?: {
-      hasSelectedApiKey: () => Promise<boolean>;
-      openSelectKey: () => Promise<void>;
-    };
-  }
-}
 
 type StoryPart = 
   | { type: 'text', text: string, id: string, audioUrl?: string, audioBase64?: string, isPlaying?: boolean, isLoadingAudio?: boolean }
@@ -205,7 +197,7 @@ function cosineSimilarity(a: number[], b: number[]) {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-// ─── Gender-Aware Voice Assignment ──────────────────────────────────────────
+// Voice assignment
 const FEMALE_NAMES = new Set([
   'elara', 'luna', 'mira', 'aria', 'elena', 'aurora', 'selene', 'freya', 'nyx',
   'cassandra', 'isolde', 'lyra', 'ophelia', 'persephone', 'andromeda', 'calypso',
@@ -251,7 +243,7 @@ function assignVoice(name: string, existing: Record<string, string>): string {
   return 'Puck';
 }
 
-// ─── Mood-to-Music Prompt Mapping (for Lyria RealTime) ─────────────────────
+// Mood extraction for background music
 function extractMoodPrompt(storyText: string): string {
   const lower = storyText.toLowerCase();
   const moods = [
@@ -268,11 +260,10 @@ function extractMoodPrompt(storyText: string): string {
   return 'gentle cinematic ambient background music, soft strings and piano';
 }
 
-// ─── Gemini API Key Helper (only used as fallback when ADK server unavailable) ───
 function getApiKey(): string | undefined {
-  if (typeof window !== 'undefined' && (window as any).process?.env?.API_KEY) return (window as any).process.env.API_KEY;
-  if (typeof window !== 'undefined' && (window as any).process?.env?.GEMINI_API_KEY) return (window as any).process.env.GEMINI_API_KEY;
-  return process.env.API_KEY || process.env.GEMINI_API_KEY;
+  return (import.meta as any).env?.VITE_GEMINI_API_KEY
+    || (import.meta as any).env?.GEMINI_API_KEY
+    || process.env.GEMINI_API_KEY;
 }
 
 const PROMPT_SUGGESTIONS = [
@@ -283,10 +274,11 @@ const PROMPT_SUGGESTIONS = [
 ];
 
 const FEATURE_CARDS = [
-  { title: 'Cinematic Text', desc: 'Gemini 3.1 Pro streams scripts with speaker labels and image markers in real-time', model: 'gemini-3.1-pro-preview', color: '#8b2e16' },
-  { title: 'AI Illustrations', desc: 'Each [IMAGE:] marker triggers 1K resolution, 16:9 generation with consistent art style', model: 'gemini-3.1-flash-image', color: '#d97706' },
-  { title: 'Multi-Voice TTS', desc: 'Distinct character voices narrate with up to 5 speakers via streaming WebAudio', model: 'gemini-2.5-flash-tts', color: '#059669' },
-  { title: 'Story Fingerprint', desc: 'Multimodal embeddings power "More Like This" discovery across your library', model: 'gemini-embedding-2', color: '#7c3aed' },
+  { title: 'Cinematic Text', desc: 'Streams scripts with speaker labels, image markers, and real-time interleaving', model: 'gemini-3.1-pro', color: '#8b2e16' },
+  { title: 'AI Illustrations', desc: '1K resolution, 16:9 images with Ken Burns cinematic pan/zoom animation', model: 'gemini-3.1-flash-image', color: '#d97706' },
+  { title: 'Character Voices', desc: 'Gender-aware casting — female, male, and narrator voices assigned by name', model: 'gemini-2.5-flash-tts', color: '#059669' },
+  { title: 'Ambient Score', desc: 'Mood-aware background music that shifts with the story atmosphere', model: 'lyria-realtime-exp', color: '#ec4899' },
+  { title: 'Story DNA', desc: 'Multimodal embeddings match stories by semantic similarity, not keywords', model: 'gemini-embedding-2', color: '#7c3aed' },
 ];
 
 export default function App() {
@@ -319,7 +311,6 @@ export default function App() {
   const [savedStories, setSavedStories] = useState<any[]>([]);
   const [showLibrary, setShowLibrary] = useState(false);
 
-  // ─── ADK Server State ─────────────────────────────────────────────────────
   const [adkAvailable, setAdkAvailable] = useState(false);
   const [adkInfo, setAdkInfo] = useState<any>(null);
   const [agentActivity, setAgentActivity] = useState<string[]>([]);
@@ -328,7 +319,6 @@ export default function App() {
     setAgentActivity(prev => [...prev.slice(-4), msg]);
   };
 
-  // ─── Check ADK Server on mount ────────────────────────────────────────────
   useEffect(() => {
     (async () => {
       const result = await checkADKServer();
@@ -548,21 +538,9 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (getApiKey()) { setHasKey(true); return; }
-    if (window.aistudio?.hasSelectedApiKey) {
-      window.aistudio.hasSelectedApiKey().then(setHasKey);
-    } else {
-      setHasKey(false);
-    }
-  }, []);
+    setHasKey(!!getApiKey() || adkAvailable);
+  }, [adkAvailable]);
 
-  const handleSelectKey = async () => {
-    try {
-      if (window.aistudio?.openSelectKey) { await window.aistudio.openSelectKey(); setHasKey(true); }
-    } catch (err) { console.error("Failed to select key:", err); }
-  };
-
-  // ─── Image Generation (ADK server → fallback to direct) ──────────────────
   const regenerateImage = async (id: string, imagePrompt: string) => {
     setStoryParts(parts => parts.map(p => p.id === id ? { ...p, isLoading: true, error: undefined } : p));
     
@@ -603,7 +581,6 @@ export default function App() {
     }
   };
 
-  // ─── Story Generation ─────────────────────────────────────────────────────
   const generateStory = async () => {
     if (!prompt.trim()) return;
     
@@ -720,7 +697,6 @@ GROUNDING: Base your story on internally consistent world-building. Character na
 
       const newParts = currentParts;
 
-      // ─── Embedding: ADK server → fallback to direct ─────────────────────
       try {
         const firstImagePart = newParts.find(p => p.type === 'image') as { type: 'image', url: string, prompt?: string } | undefined;
         
@@ -772,7 +748,6 @@ GROUNDING: Base your story on internally consistent world-building. Character na
     }
   };
 
-  // ─── TTS Playback (client-side, needs WebAudio API) ───────────────────────
   const playAudio = async (partId: string, text: string, autoNextIndex?: number) => {
     const part = storyParts.find(p => p.id === partId);
     if (part?.type === 'text' && part.isPlaying && activeAudio) {
@@ -948,7 +923,6 @@ GROUNDING: Base your story on internally consistent world-building. Character na
     }
   };
 
-  // ─── Lyria RealTime Background Music ──────────────────────────────────────
   const startBackgroundMusic = async () => {
     if (!musicEnabled) return;
     try {
@@ -1023,31 +997,6 @@ GROUNDING: Base your story on internally consistent world-building. Character na
     if (activeAudio) { activeAudio.pause(); setActiveAudio(null); setStoryParts(parts => parts.map(p => p.type === 'text' ? { ...p, isPlaying: false } : p)); }
   };
 
-  // ─── API Key Gate ─────────────────────────────────────────────────────────
-  if (!hasKey) {
-    return (
-      <div className="min-h-screen bg-[#f5f5f0] text-[#2c2c2c] flex flex-col items-center justify-center p-6 relative overflow-hidden">
-        <div className="atmosphere"></div>
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="max-w-md w-full glass-panel p-10 flex flex-col items-center text-center">
-          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-[#8b2e16] to-[#5A5A40] flex items-center justify-center mb-6 shadow-[0_0_40px_rgba(139,46,22,0.2)]">
-            <Sparkles className="w-10 h-10 text-[#f5f5f0]" />
-          </div>
-          <h1 className="text-4xl font-serif mb-3 tracking-tight">OmniWeave</h1>
-          <p className="text-[#8b2e16]/70 mb-8 text-sm leading-relaxed">The multimodal creative director. Weave text, images, and voiceover into a single fluid story.</p>
-          <div className="bg-[#fdfbf7]/60 border border-black/10 rounded-xl p-5 mb-8 text-left w-full">
-            <h3 className="text-sm font-semibold text-[#2c2c2c] mb-2 flex items-center gap-2"><AlertCircle className="w-4 h-4 text-[#8b2e16]" />API Key Required</h3>
-            <p className="text-xs text-[#2c2c2c]/70 mb-3">This app uses Gemini 3.1 Pro Image Preview for high-quality interleaved generation.</p>
-            <p className="text-xs text-[#2c2c2c]/70">You must select an API key from a paid Google Cloud project. See <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="text-[#8b2e16] hover:underline">billing documentation</a>.</p>
-          </div>
-          <button id="select-key-btn" onClick={handleSelectKey} className="w-full py-4 bg-[#8b2e16] text-[#fdfbf7] font-medium rounded-xl hover:bg-[#8b2e16]/90 transition-colors flex items-center justify-center gap-2">
-            Select API Key <ArrowRight className="w-4 h-4" />
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
-
-  // ─── Main App ─────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#f5f5f0] text-[#2c2c2c] relative overflow-x-hidden selection:bg-[#8b2e16]/30">
       <div className="atmosphere"></div>
@@ -1084,7 +1033,7 @@ GROUNDING: Base your story on internally consistent world-building. Character na
             {adkAvailable ? 'ADK Agent Connected' : 'Direct Mode'}
           </div>
           <div className="text-[10px] md:text-xs font-mono text-[#8b2e16]/80 bg-[#fdfbf7]/60 px-2.5 md:px-3 py-1 md:py-1.5 rounded-full border border-black/5 flex items-center gap-1 whitespace-nowrap">
-            <CheckCircle2 className="w-3 h-3 text-emerald-500" /> 4 Gemini Models
+            <CheckCircle2 className="w-3 h-3 text-emerald-500" /> 5 Gemini Models
           </div>
           <div className="text-[10px] md:text-xs font-mono text-[#8b2e16]/80 bg-[#fdfbf7]/60 px-2.5 md:px-3 py-1 md:py-1.5 rounded-full border border-black/5 flex items-center gap-1 whitespace-nowrap">
             <CheckCircle2 className="w-3 h-3 text-emerald-500" /> Multi-Cast TTS
@@ -1096,7 +1045,7 @@ GROUNDING: Base your story on internally consistent world-building. Character na
         {showLibrary ? (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mt-20">
             <div className="flex items-center justify-between mb-8">
-              <h2 className="text-4xl font-serif font-light tracking-tight">Your <span className="italic text-[#8b2e16]">Library</span></h2>
+              <h2 className="text-4xl font-serif font-light tracking-tight">Story <span className="italic text-[#8b2e16]">Library</span></h2>
               <button onClick={() => setShowLibrary(false)} className="text-sm text-[#2c2c2c]/70 hover:text-[#2c2c2c] flex items-center gap-2"><ArrowRight className="w-4 h-4 rotate-180" /> Back to Weaving</button>
             </div>
             {isLoadingStory ? (
@@ -1105,7 +1054,7 @@ GROUNDING: Base your story on internally consistent world-building. Character na
                 <p className="text-[#2c2c2c]/70 font-serif italic">Loading story and images...</p>
               </div>
             ) : savedStories.length === 0 ? (
-              <div className="text-center py-20 text-[#2c2c2c]/60 font-serif italic">Your library is empty. Time to weave a new story!</div>
+              <div className="text-center py-20 text-[#2c2c2c]/60 font-serif italic">No stories yet. Be the first to weave one.</div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 {savedStories.map((story) => (
@@ -1152,8 +1101,7 @@ GROUNDING: Base your story on internally consistent world-building. Character na
                     ))}
                   </div>
 
-                  {/* Feature Cards — shows judges what 4 models do */}
-                  <div className="mt-12 grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="mt-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                     {FEATURE_CARDS.map((f) => (
                       <div key={f.title} className="p-4 rounded-xl bg-black/[0.02] border border-black/5 flex gap-3 items-start">
                         <div className="w-2 h-2 rounded-full mt-2 shrink-0" style={{ backgroundColor: f.color }} />
@@ -1349,7 +1297,7 @@ GROUNDING: Base your story on internally consistent world-building. Character na
         )}
       </main>
 
-      {/* Footer — Architecture & Tech Stack (visible to judges) */}
+      {/* Footer */}
       <footer className="border-t border-black/5 bg-[#fdfbf7]/80 backdrop-blur-sm py-8 px-4 md:px-6 mt-16">
         <div className="max-w-4xl mx-auto">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-xs text-[#2c2c2c]/60">

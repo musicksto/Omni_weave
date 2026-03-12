@@ -93,14 +93,6 @@ export const LibraryIcon = ({ className = "" }: { className?: string }) => (
   </svg>
 );
 
-export const KeyIcon = ({ className = "" }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <circle cx="7.5" cy="15.5" r="5.5" />
-    <path d="M11.5 11.5L21 2v4l-3 3v3l-3 3" />
-    <circle cx="7.5" cy="15.5" r="2" strokeOpacity="0.5" />
-  </svg>
-);
-
 export const MusicIcon = ({ className = "" }: { className?: string }) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <path d="M9 18V5l12-2v13" />
@@ -110,10 +102,3 @@ export const MusicIcon = ({ className = "" }: { className?: string }) => (
   </svg>
 );
 
-export const DoorIcon = ({ className = "" }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M14 12v.01" strokeWidth="2" />
-    <path d="M4 22h16M6 22V6a6 6 0 0 1 12 0v16" />
-    <path d="M10 6v16M18 6v16" strokeOpacity="0.2" />
-  </svg>
-);

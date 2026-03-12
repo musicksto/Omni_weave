@@ -1,18 +1,11 @@
 /**
  * OmniWeave ADK Client
- * 
+ *
  * Routes Gemini API calls through the ADK agent server on Cloud Run
  * when available, with graceful fallback to direct client-side calls.
- * 
- * This solves:
- * 1. API key exposure (key stays on server, not in browser bundle)
- * 2. ADK integration proof (judges see frontend → Cloud Run → Gemini flow)
- * 3. Multi-agent orchestration (server runs the Director + Pipeline)
  */
 
-const ADK_SERVER_URL = (typeof process !== 'undefined' && process.env?.VITE_ADK_SERVER_URL) 
-  || (import.meta as any).env?.VITE_ADK_SERVER_URL
-  || '';
+const ADK_SERVER_URL = (import.meta as any).env?.VITE_ADK_SERVER_URL || '';
 
 /** Check if the ADK server is available */
 export async function checkADKServer(): Promise<{ available: boolean; agentInfo?: any }> {

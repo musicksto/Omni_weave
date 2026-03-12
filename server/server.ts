@@ -15,7 +15,7 @@ const APP_NAME = 'omniweave';
 // Create the ADK runner
 const runner = new InMemoryRunner({ appName: APP_NAME, agent: rootAgent });
 
-// ─── Health Check (judges: visit this URL for deployment proof) ─────────────
+// Health check
 app.get('/', (_req, res) => {
   res.json({
     service: 'OmniWeave ADK Agent Server',
@@ -35,11 +35,12 @@ app.get('/', (_req, res) => {
       'gemini-3.1-flash-image-preview (1K image generation)',
       'gemini-2.5-flash-preview-tts (multi-voice narration)',
       'gemini-embedding-2-preview (multimodal embeddings)',
+      'lyria-realtime-exp (ambient background music)',
     ],
   });
 });
 
-// ─── Agent Architecture Info (judges: this shows the multi-agent system) ────
+// Agent architecture info
 app.get('/api/agent-info', (_req, res) => {
   res.json({
     rootAgent: {
@@ -80,7 +81,6 @@ app.get('/api/agent-info', (_req, res) => {
   });
 });
 
-// ─── Generate Story (Streaming via SSE) ─────────────────────────────────────
 app.post('/api/generate', async (req, res) => {
   const { prompt, userId = 'default-user', sessionId } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt is required' });
@@ -122,7 +122,6 @@ app.post('/api/generate', async (req, res) => {
   }
 });
 
-// ─── Generate Image (Direct Tool Call) ──────────────────────────────────────
 app.post('/api/generate-image', async (req, res) => {
   const { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: 'prompt is required' });
@@ -150,7 +149,6 @@ app.post('/api/generate-image', async (req, res) => {
   }
 });
 
-// ─── Compute Embedding ──────────────────────────────────────────────────────
 app.post('/api/embed', async (req, res) => {
   const { text, imageBase64, imageMimeType } = req.body;
   if (!text) return res.status(400).json({ error: 'text is required' });
