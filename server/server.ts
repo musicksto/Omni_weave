@@ -33,7 +33,7 @@ app.get('/', (_req, res) => {
     geminiModels: [
       'gemini-3-flash-preview (agent reasoning)',
       'gemini-3.1-flash-image-preview (1K image generation)',
-      'gemini-3-flash-preview-preview-tts (multi-voice narration)',
+      'gemini-2.5-flash-preview-tts (multi-voice narration)',
       'gemini-embedding-2-preview (multimodal embeddings)',
       'lyria-realtime-exp (ambient background music)',
     ],
@@ -51,7 +51,7 @@ app.get('/api/agent-info', (_req, res) => {
     },
     tools: [
       { name: 'generate_image', model: 'gemini-3.1-flash-image-preview', description: '1K resolution 16:9 image generation' },
-      { name: 'generate_speech', model: 'gemini-3-flash-preview-preview-tts', description: 'Multi-speaker voice narration with streaming audio' },
+      { name: 'generate_speech', model: 'gemini-2.5-flash-preview-tts', description: 'Multi-speaker voice narration with streaming audio' },
       { name: 'compute_embedding', model: 'gemini-embedding-2-preview', description: 'Multimodal story fingerprints for similarity search' },
       { name: 'generate_music', model: 'lyria-realtime-exp', description: 'Ambient background music via Lyria RealTime streaming' },
     ],
