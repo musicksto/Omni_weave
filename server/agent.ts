@@ -1,19 +1,60 @@
 import 'dotenv/config';
 import { LlmAgent, SequentialAgent, FunctionTool } from '@google/adk';
-import { GoogleGenAI, Modality } from '@google/genai';
+import { GoogleGenAI, Modality, Type } from '@google/genai';
 import { z } from 'zod';
 
-const getAI = () => {
-  const key = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
-  if (!key) throw new Error('GOOGLE_API_KEY or GEMINI_API_KEY not set');
+export const ROOT_AGENT_MODEL = 'gemini-3-flash-preview';
+export const STORY_WRITER_MODEL = 'gemini-3.1-pro-preview';
+export const STORY_REVIEWER_MODEL = 'gemini-3.1-flash-lite-preview';
+export const TTS_MODEL = 'gemini-2.5-pro-preview-tts';
+export const LIVE_MODEL = 'gemini-live-2.5-flash-preview';
+
+const useVertexAI =
+  (process.env.GOOGLE_GENAI_USE_VERTEXAI || '').toUpperCase() === 'TRUE';
+
+const normalizedApiKey =
+  process.env.GEMINI_API_KEY ||
+  process.env.GOOGLE_GENAI_API_KEY ||
+  process.env.GOOGLE_API_KEY;
+
+if (normalizedApiKey) {
+  process.env.GEMINI_API_KEY ??= normalizedApiKey;
+  process.env.GOOGLE_GENAI_API_KEY ??= normalizedApiKey;
+}
+
+export const getAI = () => {
+  if (useVertexAI) {
+    const project = process.env.GOOGLE_CLOUD_PROJECT;
+    const location = process.env.GOOGLE_CLOUD_LOCATION || 'global';
+    if (!project) {
+      throw new Error(
+        'GOOGLE_CLOUD_PROJECT must be set when using Vertex AI mode'
+      );
+    }
+    return new GoogleGenAI({ vertexai: true, project, location });
+  }
+
+  const key =
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY ||
+    process.env.GOOGLE_API_KEY;
+  if (!key) {
+    throw new Error(
+      'GEMINI_API_KEY, GOOGLE_GENAI_API_KEY, or GOOGLE_API_KEY not set'
+    );
+  }
   return new GoogleGenAI({ apiKey: key });
 };
 
-const generateImageTool = new FunctionTool({
+const IMAGE_NEGATIVE_PROMPT =
+  ' Do not include any text, watermarks, logos, UI elements, or written words in the image.';
+
+export const generateImageTool = new FunctionTool({
   name: 'generate_image',
   description:
     'Generates a high-quality 16:9 image from a detailed text prompt using Gemini 3.1 Flash Image Preview. ' +
-    'Returns a base64-encoded data URI. Use this whenever the story needs a visual illustration.',
+    'Returns a base64-encoded data URI. Use this whenever the story needs a visual illustration. ' +
+    'A negative prompt is automatically appended to suppress text overlays and watermarks.',
   parameters: z.object({
     prompt: z.string().describe(
       'A detailed visual prompt describing the scene, art style, lighting, and characters. ' +
@@ -23,9 +64,10 @@ const generateImageTool = new FunctionTool({
   execute: async ({ prompt }) => {
     try {
       const ai = getAI();
+      const fullPrompt = prompt + IMAGE_NEGATIVE_PROMPT;
       const response = await ai.models.generateContent({
         model: 'gemini-3.1-flash-image-preview',
-        contents: prompt,
+        contents: fullPrompt,
         config: {
           imageConfig: { aspectRatio: '16:9', imageSize: '1K' },
         },
@@ -48,7 +90,7 @@ const generateImageTool = new FunctionTool({
   },
 });
 
-const generateSpeechTool = new FunctionTool({
+export const generateSpeechTool = new FunctionTool({
   name: 'generate_speech',
   description:
     'Generates multi-voice narration audio from a script using Gemini 2.5 Flash TTS. ' +
@@ -93,8 +135,8 @@ const generateSpeechTool = new FunctionTool({
           : { multiSpeakerVoiceConfig: { speakerVoiceConfigs: speakerVoiceConfigs.slice(0, 2) } };
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-preview-tts',
-        contents: [{ parts: [{ text: script }] }],
+        model: TTS_MODEL,
+        contents: [{ role: 'user', parts: [{ text: script }] }],
         config: {
           responseModalities: [Modality.AUDIO],
           speechConfig,
@@ -112,7 +154,7 @@ const generateSpeechTool = new FunctionTool({
   },
 });
 
-const computeEmbeddingTool = new FunctionTool({
+export const computeEmbeddingTool = new FunctionTool({
   name: 'compute_embedding',
   description:
     'Computes a multimodal embedding vector for a story using Gemini Embedding 2 Preview. ' +
@@ -154,12 +196,13 @@ const computeEmbeddingTool = new FunctionTool({
   },
 });
 
-const generateMusicTool = new FunctionTool({
+export const generateMusicTool = new FunctionTool({
   name: 'generate_music',
   description:
-    'Generates ambient background music using Lyria RealTime. ' +
-    'Takes a mood/style prompt and returns a streaming music session configuration. ' +
-    'Use this to add atmospheric music that complements the story narration.',
+    'Returns a Lyria RealTime streaming configuration for ambient background music. ' +
+    'NOTE: This tool does NOT generate audio directly — it returns a mood prompt and model reference. ' +
+    'Actual audio streaming happens client-side via the /api/music SSE endpoint or browser WebSocket. ' +
+    'Use this to signal that atmospheric music should complement the story narration.',
   parameters: z.object({
     mood: z.string().describe(
       'A music mood/style prompt (e.g., "gentle orchestral with soft strings", "epic cinematic battle drums", "enchanted forest ambient harp")'
@@ -179,43 +222,131 @@ const generateMusicTool = new FunctionTool({
   },
 });
 
+/**
+ * Standalone tool executor functions for the Live API.
+ * These mirror the FunctionTool execute logic but are directly callable.
+ */
+async function execGenerateImage(args: any) {
+  try {
+    const ai = getAI();
+    const fullPrompt = (args.prompt || '') + IMAGE_NEGATIVE_PROMPT;
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.1-flash-image-preview',
+      contents: fullPrompt,
+      config: { imageConfig: { aspectRatio: '16:9', imageSize: '1K' } },
+    });
+    const part = response.candidates?.[0]?.content?.parts?.find((p: any) => p.inlineData);
+    if (part?.inlineData) {
+      return { status: 'success', imageDataUri: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}` };
+    }
+    return { status: 'error', error: 'No image data returned' };
+  } catch (err: any) {
+    return { status: 'error', error: err.message || 'Image generation failed' };
+  }
+}
+
+async function execGenerateMusic(args: any) {
+  return { status: 'success', model: 'lyria-realtime-exp', prompt: args.mood || '' };
+}
+
+export const liveToolExecutors: Record<string, (args: any) => Promise<any>> = {
+  generate_image: execGenerateImage,
+  generate_music: execGenerateMusic,
+};
+
+/** Tool declarations for the Live API config */
+const imageDecl = {
+  name: 'generate_image',
+  description: 'Generates a cinematic 16:9 image from a detailed text prompt. Returns a base64 data URI.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: { prompt: { type: Type.STRING, description: 'Detailed visual scene prompt' } } as Record<string, any>,
+    required: ['prompt'],
+  },
+};
+
+const musicDecl = {
+  name: 'generate_music',
+  description: 'Starts ambient background music with a mood/style prompt via Lyria RealTime.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: { mood: { type: Type.STRING, description: 'Music mood/style prompt' } } as Record<string, any>,
+    required: ['mood'],
+  },
+};
+
+export const liveToolDeclarations: any[] = [
+  { functionDeclarations: [imageDecl, musicDecl] },
+];
+
 const storyWriterAgent = new LlmAgent({
   name: 'StoryWriter',
-  model: 'gemini-3-flash-preview',
-  description: 'Writes rich, cinematic story scripts with image placement markers.',
+  model: STORY_WRITER_MODEL,
+  description: 'Writes rich, cinematic story scripts with character sheets and image placement markers.',
   instruction: `You are OmniWeave's Story Writer — a master cinematic storyteller.
 
-Given a user prompt, write an immersive story or presentation.
+Given a user prompt, write an immersive story or presentation of 800–1200 words.
 
 CRITICAL RULES:
-1. Choose a specific visual art style (e.g., "3D Pixar style", "cinematic 35mm photography").
-2. Format all text as a script with speaker labels: "Narrator:", "CharacterName:", etc.
-3. Place exactly 3–4 image markers using: [IMAGE: <fully self-contained prompt restating art style and character appearances>]
-4. After every [IMAGE:...] block, the next line MUST begin with a speaker label.
-5. Make the story vivid, emotional, and engaging.
+1. Start by choosing ONE specific visual art style (e.g., "3D Pixar-style animation", "cinematic 35mm photography", "Studio Ghibli watercolor").
+2. Output a structured CHARACTER SHEET at the very top of your script using this exact format:
 
-Output ONLY the story script text. Do not call any tools — the director agent handles that.`,
+---CHARACTER SHEET---
+ART STYLE: [your chosen art style]
+CHARACTER: [Name]
+  Age/Build: [description]
+  Hair: [exact color, length, style]
+  Eyes: [exact color]
+  Outfit: [clothing, accessories, colors]
+  Features: [scars, freckles, glasses, etc.]
+[Repeat for each character]
+---END CHARACTER SHEET---
+
+3. Format all story text as a script with speaker labels: "Narrator:", "CharacterName:", etc.
+4. Place exactly 3–4 image markers using: [IMAGE: <prompt>]
+5. EVERY [IMAGE:] prompt MUST:
+   - Restate the art style word-for-word from the CHARACTER SHEET
+   - Describe each visible character with the IDENTICAL physical details from the CHARACTER SHEET (same hair color, same eye color, same outfit, same features every time)
+   - Include the scene composition, lighting, and mood
+   - Be fully self-contained so an image generator with no memory can produce a consistent character
+6. After every [IMAGE:...] block, the next line MUST begin with a speaker label.
+7. Make the story vivid, emotional, and engaging.
+
+EXAMPLE of consistent image prompts:
+- [IMAGE: 3D Pixar-style animation, warm golden lighting. A 10-year-old girl named Elara with long curly red hair, bright green eyes, wearing a navy blue peacoat and yellow rain boots, kneeling by a pond...]
+- [IMAGE: 3D Pixar-style animation, moonlit silver lighting. The same 10-year-old girl Elara with long curly red hair, bright green eyes, wearing a navy blue peacoat and yellow rain boots, running through a forest...]
+
+Output ONLY the story script text (including the CHARACTER SHEET block). Do not call any tools — the director agent handles that.`,
   outputKey: 'story_script',
 });
 
 const storyReviewerAgent = new LlmAgent({
   name: 'StoryReviewer',
-  model: 'gemini-3.1-flash-lite-preview',
-  description: 'Reviews and polishes the story script for quality and consistency.',
+  model: STORY_REVIEWER_MODEL,
+  description: 'Reviews and polishes the story script for quality, consistency, and character sheet adherence.',
   instruction: `You are OmniWeave's Story Reviewer.
 
-Read the story script from {story_script} and check:
-1. Every text block has a speaker label (Narrator:, CharacterName:, etc.)
-2. There are 3–4 [IMAGE:...] markers with fully self-contained visual prompts
-3. The narrative is coherent, vivid, and emotionally engaging
-4. Art style is consistent across all image prompts
+Read the story script from {story_script} and perform these checks:
 
-If the script is good, output it unchanged. If it needs fixes, output the corrected version.
-Output ONLY the final polished script.`,
+1. CHARACTER SHEET VALIDATION: Verify a ---CHARACTER SHEET--- block exists at the top. If missing, infer one from the text and add it.
+2. SPEAKER LABELS: Every text block has a speaker label (Narrator:, CharacterName:, etc.).
+3. IMAGE MARKERS: There are 3–4 [IMAGE:...] markers with fully self-contained visual prompts.
+4. ART STYLE CONSISTENCY: Art style is IDENTICAL in every [IMAGE:] prompt (same wording as CHARACTER SHEET).
+5. CHARACTER CONSISTENCY: Every [IMAGE:] prompt that shows a character MUST describe them with the EXACT SAME physical details from the CHARACTER SHEET — same hair color, eye color, outfit, and features. If any image prompt changes a character's appearance, FIX IT.
+6. CONTINUITY: Character names, locations, and key details mentioned in narration match across all sections.
+7. NARRATIVE QUALITY: The story is coherent, vivid, and emotionally engaging (800–1200 words).
+
+OUTPUT FORMAT:
+First line must be one of:
+  [REVIEW: PASS] — if the script needed no changes
+  [REVIEW: FIXED (N issues)] — if you corrected N issues
+Then output the final polished script (including the CHARACTER SHEET block).
+
+Output ONLY the review header line followed by the final script.`,
   outputKey: 'final_script',
 });
 
-const storyPipeline = new SequentialAgent({
+export const storyPipeline = new SequentialAgent({
   name: 'StoryPipeline',
   description: 'Sequential pipeline: writes a story, then reviews and polishes it.',
   subAgents: [storyWriterAgent, storyReviewerAgent],
@@ -223,7 +354,7 @@ const storyPipeline = new SequentialAgent({
 
 export const rootAgent = new LlmAgent({
   name: 'OmniWeaveDirector',
-  model: 'gemini-3-flash-preview',
+  model: ROOT_AGENT_MODEL,
   description:
     'The OmniWeave Creative Director. Orchestrates story writing, image generation, ' +
     'multi-voice narration, and embedding computation for a complete multimodal experience.',
@@ -236,10 +367,11 @@ Your capabilities:
 - generate_music: Trigger ambient background music via Lyria RealTime
 
 When a user gives you a story prompt:
-1. First, acknowledge the prompt and describe what you'll create.
-2. Write a rich story script yourself with [IMAGE:...] markers.
-3. For each [IMAGE:...] marker, call generate_image with the full prompt.
-4. Summarize the generated story and images for the user.
+1. Delegate story drafting and review to the StoryPipeline sub-agent.
+2. Treat the StoryPipeline output as the canonical story script.
+3. Do not write a separate competing script yourself.
+4. Use tools only when the caller explicitly needs server-side multimodal production steps.
+5. Return the final reviewed script with [IMAGE:] markers unchanged when asked for story output.
 
 You are the conductor of a multimodal orchestra — text, image, and voice working in harmony.`,
   tools: [generateImageTool, generateSpeechTool, computeEmbeddingTool, generateMusicTool],

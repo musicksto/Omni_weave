@@ -1,24 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, Modality } from '@google/genai';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
-import { PlayIcon as Play, StopIcon as Square, SpinnerIcon as Loader2, QuillIcon as Sparkles, ArrowRightIcon as ArrowRight, CheckIcon as CheckCircle2, AlertIcon as AlertCircle, BookIcon as BookOpen, DownloadIcon as Download, BookmarkIcon as Save, LibraryIcon as Library, MusicIcon } from './components/Icons';
+import { PlayIcon as Play, StopIcon as Square, SpinnerIcon as Loader2, QuillIcon as Sparkles, ArrowRightIcon as ArrowRight, CheckIcon as CheckCircle2, AlertIcon as AlertCircle, BookIcon as BookOpen, DownloadIcon as Download, BookmarkIcon as Save, LibraryIcon as Library, MusicIcon, MicrophoneIcon, MicOffIcon, LiveIcon } from './components/Icons';
+import { createLiveClient, type LiveCallbacks } from './liveClient';
 import { auth, db } from './firebase';
 import { signInAnonymously, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { collection, addDoc, getDocs, query, where, orderBy, serverTimestamp, doc, setDoc, getDocFromServer, getDoc } from 'firebase/firestore';
-import { checkADKServer, generateImageViaADK, computeEmbeddingViaADK, isADKEnabled, getADKServerURL } from './adkClient';
+import { collection, addDoc, getDocs, query, where, serverTimestamp, doc, getDocFromServer } from 'firebase/firestore';
+import { checkADKServer, generateImageViaADK, computeEmbeddingViaADK, generateStoryViaADK, getADKServerURL } from './adkClient';
+import { createStoryStreamState, appendStoryChunk, flushStoryChunk } from './storyStream.js';
 
 
 type StoryPart = 
   | { type: 'text', text: string, id: string, audioUrl?: string, audioBase64?: string, isPlaying?: boolean, isLoadingAudio?: boolean }
   | { type: 'image', url: string, id: string, isLoading?: boolean, prompt?: string, error?: string };
-
-async function hashText(text: string) {
-  const msgBuffer = new TextEncoder().encode(text);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-}
 
 function createWavFile(pcmBase64: string, sampleRate: number = 24000): string {
   const binary = atob(pcmBase64);
@@ -180,7 +175,6 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
 }
 
 function cosineSimilarity(a: number[], b: number[]) {
@@ -236,8 +230,8 @@ function assignVoice(name: string, existing: Record<string, string>): string {
   if (name === 'Narrator') return 'Zephyr';
   const gender = guessGender(name);
   const used = new Set(Object.values(existing));
-  const FEMALE_VOICES = ['Kore', 'Aoede'];
-  const MALE_VOICES = ['Fenrir', 'Charon'];
+  const FEMALE_VOICES = ['Kore', 'Aoede', 'Leda'];
+  const MALE_VOICES = ['Fenrir', 'Charon', 'Enceladus'];
   if (gender === 'female') return FEMALE_VOICES.find(v => !used.has(v)) || FEMALE_VOICES[0];
   if (gender === 'male') return MALE_VOICES.find(v => !used.has(v)) || MALE_VOICES[0];
   return 'Puck';
@@ -255,34 +249,40 @@ function extractMoodPrompt(storyText: string): string {
     { kw: ['forest', 'tree', 'nature', 'garden', 'wild'], prompt: 'enchanted forest ambient music, gentle flute and harp, nature sounds' },
     { kw: ['city', 'neon', 'cyberpunk', 'tech', 'robot'], prompt: 'synthwave cyberpunk ambient music, electronic pads and bass' },
     { kw: ['magic', 'spell', 'wizard', 'enchant', 'mystic'], prompt: 'mystical fantasy ambient music, ethereal vocals and chimes' },
+    { kw: ['adventure', 'quest', 'journey', 'explore', 'discover'], prompt: 'adventurous orchestral music, soaring strings and triumphant horns' },
+    { kw: ['comedy', 'funny', 'laugh', 'joke', 'silly'], prompt: 'lighthearted playful music, pizzicato strings and bouncy woodwinds' },
+    { kw: ['horror', 'ghost', 'haunted', 'scream', 'nightmare'], prompt: 'tense horror ambient music, dissonant strings and eerie drones' },
+    { kw: ['mystery', 'detective', 'clue', 'secret', 'puzzle'], prompt: 'suspenseful mystery music, muted piano and subtle tension building' },
+    { kw: ['castle', 'kingdom', 'medieval', 'knight', 'throne'], prompt: 'medieval fantasy music, lute and recorder with regal brass' },
+    { kw: ['fairy', 'dream', 'whimsy', 'wonder', 'sparkle'], prompt: 'whimsical fairy-tale music, celesta and gentle strings with magical chimes' },
   ];
   for (const m of moods) { if (m.kw.some(k => lower.includes(k))) return m.prompt; }
   return 'gentle cinematic ambient background music, soft strings and piano';
 }
 
 function getApiKey(): string | undefined {
-  return (import.meta as any).env?.VITE_GEMINI_API_KEY
-    || (import.meta as any).env?.GEMINI_API_KEY
-    || process.env.GEMINI_API_KEY;
+  const apiKey = (import.meta as any).env?.VITE_GEMINI_API_KEY;
+  return typeof apiKey === 'string' && apiKey.trim() ? apiKey.trim() : undefined;
 }
 
 const PROMPT_SUGGESTIONS = [
-  { label: 'Cyberpunk Noir', prompt: 'A cyberpunk detective exploring a neon-lit underwater city, searching for a stolen AI consciousness', icon: '🌊' },
-  { label: 'Fantasy Quest', prompt: 'A young alchemist discovers a living map that leads to the last dragon egg hidden in a floating mountain kingdom', icon: '🐉' },
-  { label: 'Space Opera', prompt: 'Two rival starship captains must work together when they discover an ancient alien signal coming from inside a dying star', icon: '🚀' },
-  { label: 'Folklore Retold', prompt: 'A modern retelling of a Japanese folktale where a spirit fox runs a late-night ramen shop in rainy Tokyo', icon: '🦊' },
+  { label: 'Cyberpunk Noir', prompt: 'A cyberpunk detective exploring a neon-lit underwater city, searching for a stolen AI consciousness' },
+  { label: 'Fantasy Quest', prompt: 'A young alchemist discovers a living map that leads to the last dragon egg hidden in a floating mountain kingdom' },
+  { label: 'Space Opera', prompt: 'Two rival starship captains must work together when they discover an ancient alien signal coming from inside a dying star' },
+  { label: 'Folklore Retold', prompt: 'A modern retelling of a Japanese folktale where a spirit fox runs a late-night ramen shop in rainy Tokyo' },
 ];
 
-const FEATURE_CARDS = [
-  { title: 'Cinematic Text', desc: 'Streams scripts with speaker labels, image markers, and real-time interleaving', model: 'gemini-3.1-pro', color: '#8b2e16' },
-  { title: 'AI Illustrations', desc: '1K resolution, 16:9 images with Ken Burns cinematic pan/zoom animation', model: 'gemini-3.1-flash-image', color: '#d97706' },
-  { title: 'Character Voices', desc: 'Gender-aware casting — female, male, and narrator voices assigned by name', model: 'gemini-2.5-flash-tts', color: '#059669' },
-  { title: 'Ambient Score', desc: 'Mood-aware background music that shifts with the story atmosphere', model: 'lyria-realtime-exp', color: '#ec4899' },
-  { title: 'Story DNA', desc: 'Multimodal embeddings match stories by semantic similarity, not keywords', model: 'gemini-embedding-2', color: '#7c3aed' },
+const PIPELINE_STEPS = [
+  { label: 'Live Voice', model: 'gemini-live-2.5-flash', desc: 'Bidi-streaming voice interaction' },
+  { label: 'Story Writing', model: 'gemini-3.1-pro', desc: 'Cinematic scripts with character sheets' },
+  { label: 'Quality Review', model: 'gemini-3.1-flash-lite', desc: 'Consistency & narrative polish' },
+  { label: '1K Illustrations', model: 'gemini-3.1-flash-image', desc: 'Art-directed scene generation' },
+  { label: 'Voice Casting', model: 'gemini-2.5-pro-tts', desc: 'Multi-speaker narration' },
+  { label: 'Ambient Score', model: 'lyria-realtime', desc: 'Mood-reactive background music' },
+  { label: 'Story DNA', model: 'gemini-embedding-2', desc: 'Semantic similarity fingerprints' },
 ];
 
 export default function App() {
-  const [hasKey, setHasKey] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [storyParts, setStoryParts] = useState<StoryPart[]>([]);
@@ -294,9 +294,14 @@ export default function App() {
   const [isAutoPlaying, setIsAutoPlaying] = useState(false);
   const [currentPlayIndex, setCurrentPlayIndex] = useState<number>(-1);
   const [review, setReview] = useState('');
+  const [reviewStatus, setReviewStatus] = useState<string>('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [musicEnabled, setMusicEnabled] = useState(false);
   const [musicSession, setMusicSession] = useState<any>(null);
+
+  // Ref to avoid stale closures in audio callbacks
+  const storyPartsRef = useRef<StoryPart[]>([]);
+  useEffect(() => { storyPartsRef.current = storyParts; }, [storyParts]);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -312,18 +317,159 @@ export default function App() {
   const [showLibrary, setShowLibrary] = useState(false);
 
   const [adkAvailable, setAdkAvailable] = useState(false);
-  const [adkInfo, setAdkInfo] = useState<any>(null);
   const [agentActivity, setAgentActivity] = useState<string[]>([]);
+
+  // --- Live Mode State ---
+  const [isLiveMode, setIsLiveMode] = useState(false);
+  const [isLiveConnecting, setIsLiveConnecting] = useState(false);
+  const [isLiveConnected, setIsLiveConnected] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [liveTranscript, setLiveTranscript] = useState<Array<{ role: string; text: string; image?: string }>>([]);
+  const [liveToolStatus, setLiveToolStatus] = useState('');
+  const liveClientRef = useRef<ReturnType<typeof createLiveClient> | null>(null);
+  const liveTranscriptEndRef = useRef<HTMLDivElement>(null);
 
   const addAgentActivity = (msg: string) => {
     setAgentActivity(prev => [...prev.slice(-4), msg]);
   };
 
+  // --- Live Mode Functions ---
+  const startLiveMode = async () => {
+    const adkUrl = getADKServerURL();
+    if (!adkUrl) {
+      showToast('ADK server not available for Live Mode', 'error');
+      return;
+    }
+
+    setIsLiveConnecting(true);
+    setLiveTranscript([]);
+    setLiveToolStatus('');
+
+    const callbacks: LiveCallbacks = {
+      onConnected: () => {
+        setIsLiveConnecting(false);
+        setIsLiveConnected(true);
+        setLiveTranscript(prev => [...prev, { role: 'system', text: 'Connected to OmniWeave Live. Start speaking to create your story...' }]);
+      },
+      onText: (text) => {
+        setLiveTranscript(prev => {
+          const last = prev[prev.length - 1];
+          if (last?.role === 'assistant' && !last.image) {
+            return [...prev.slice(0, -1), { ...last, text: last.text + text }];
+          }
+          return [...prev, { role: 'assistant', text }];
+        });
+        setLiveToolStatus('');
+      },
+      onAudio: () => { /* Audio playback handled by liveClient internally */ },
+      onImage: (dataUri) => {
+        setLiveTranscript(prev => [...prev, { role: 'image', text: '', image: dataUri }]);
+        setLiveToolStatus('');
+      },
+      onToolCall: (toolName, message) => {
+        setLiveToolStatus(`${toolName}: ${message}`);
+      },
+      onTurnComplete: () => {
+        setLiveToolStatus('');
+      },
+      onError: (message) => {
+        setLiveTranscript(prev => [...prev, { role: 'error', text: message }]);
+        setLiveToolStatus('');
+      },
+      onDisconnected: () => {
+        setIsLiveConnected(false);
+        setIsLiveConnecting(false);
+        setLiveTranscript(prev => [...prev, { role: 'system', text: 'Disconnected from Live session.' }]);
+      },
+    };
+
+    try {
+      const client = createLiveClient(adkUrl, callbacks);
+      liveClientRef.current = client;
+      await client.start();
+      setIsLiveMode(true);
+    } catch (err: any) {
+      setIsLiveConnecting(false);
+      showToast(err.message || 'Failed to start Live Mode', 'error');
+    }
+  };
+
+  const stopLiveMode = () => {
+    liveClientRef.current?.stop();
+    liveClientRef.current = null;
+    setIsLiveMode(false);
+    setIsLiveConnected(false);
+    setIsLiveConnecting(false);
+    setIsMuted(false);
+  };
+
+  const toggleMute = () => {
+    if (liveClientRef.current) {
+      const muted = liveClientRef.current.toggleMute();
+      setIsMuted(muted);
+    }
+  };
+
+  const sendLiveText = (text: string) => {
+    if (liveClientRef.current && text.trim()) {
+      liveClientRef.current.sendText(text.trim());
+      setLiveTranscript(prev => [...prev, { role: 'user', text: text.trim() }]);
+    }
+  };
+
+  // Auto-scroll live transcript
+  useEffect(() => {
+    liveTranscriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [liveTranscript]);
+
+  // --- Story Progress Bar ---
+  const [scrollProgress, setScrollProgress] = useState(0);
+  const showProgress = storyParts.length > 0 && !showLibrary;
+
+  useEffect(() => {
+    if (!showProgress) return;
+    const onScroll = () => {
+      const scrollTop = window.scrollY;
+      const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+      setScrollProgress(docHeight > 0 ? Math.min(1, scrollTop / docHeight) : 0);
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, [showProgress]);
+
+  // --- Scroll-triggered Nav ---
+  const navRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const onScroll = () => {
+      if (navRef.current) {
+        navRef.current.classList.toggle('scrolled', window.scrollY > 40);
+      }
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // --- Pipeline Observer (IntersectionObserver) ---
+  const pipelineRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = pipelineRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.querySelectorAll('.pipeline-step').forEach(step => step.classList.add('visible'));
+        }
+      },
+      { threshold: 0.2 }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [storyParts.length, showLibrary]);
+
   useEffect(() => {
     (async () => {
       const result = await checkADKServer();
       setAdkAvailable(result.available);
-      if (result.agentInfo) setAdkInfo(result.agentInfo);
       if (result.available) {
         console.log('🧵 ADK Agent Server connected:', getADKServerURL());
         console.log('   Agent:', result.agentInfo?.rootAgent?.name);
@@ -333,12 +479,15 @@ export default function App() {
 
   useEffect(() => {
     const fetchSimilar = async () => {
-      if (!embedding) {
+      if (!embedding || !user) {
         setSimilarStories([]);
         return;
       }
       try {
-        const q = query(collection(db, 'stories'));
+        const q = query(
+          collection(db, 'stories'),
+          where('authorId', '==', user.uid),
+        );
         const querySnapshot = await getDocs(q);
         const stories = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as any));
         
@@ -357,7 +506,7 @@ export default function App() {
       }
     };
     fetchSimilar();
-  }, [embedding, prompt]);
+  }, [embedding, prompt, user]);
 
   useEffect(() => {
     async function testConnection() {
@@ -385,9 +534,11 @@ export default function App() {
   const loadLibrary = async () => {
     if (!user) return;
     try {
-      const q = query(collection(db, 'stories'), orderBy('createdAt', 'desc'));
+      const q = query(collection(db, 'stories'), where('authorId', '==', user.uid));
       const querySnapshot = await getDocs(q);
-      const stories = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const stories = querySnapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() }))
+        .sort((a: any, b: any) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
       setSavedStories(stories);
       setShowLibrary(true);
     } catch (error) {
@@ -414,22 +565,13 @@ export default function App() {
       if (review.trim()) storyData.review = review.trim();
       if (embedding) storyData.embedding = embedding;
 
+      console.log('Saving story:', { fields: Object.keys(storyData), partsLen: storyData.parts.length, hasReview: !!storyData.review, hasEmbedding: !!storyData.embedding, embeddingLen: storyData.embedding?.length });
       const storyRef = await addDoc(collection(db, 'stories'), storyData);
 
-      const imageParts = storyParts.filter(p => p.type === 'image' && p.url);
-      for (const part of imageParts) {
-        if (part.type === 'image' && part.url) {
-          await addDoc(collection(db, 'stories', storyRef.id, 'images'), {
-            storyId: storyRef.id,
-            partId: part.id,
-            base64Data: part.url,
-            createdAt: serverTimestamp()
-          });
-        }
-      }
       showToast("Story saved to your library!");
     } catch (error) {
       handleFirestoreError(error, OperationType.CREATE, 'stories');
+      showToast("Save failed — check console for details");
     } finally {
       setIsSaving(false);
     }
@@ -441,19 +583,7 @@ export default function App() {
     setReview(story.review || '');
     setEmbedding(story.embedding || null);
     try {
-      let parsedParts = JSON.parse(story.parts);
-      const imagesSnapshot = await getDocs(collection(db, 'stories', story.id, 'images'));
-      const imagesMap = new Map();
-      imagesSnapshot.forEach(doc => {
-        const data = doc.data();
-        imagesMap.set(data.partId, data.base64Data);
-      });
-
-      parsedParts = parsedParts.map((part: any) => {
-        if (part.type === 'image' && imagesMap.has(part.id)) return { ...part, url: imagesMap.get(part.id) };
-        return part;
-      });
-
+      const parsedParts = JSON.parse(story.parts);
       setStoryParts(parsedParts);
       setShowLibrary(false);
     } catch (e) {
@@ -537,48 +667,59 @@ export default function App() {
     showToast('Audiobook exported!');
   };
 
-  useEffect(() => {
-    setHasKey(!!getApiKey() || adkAvailable);
-  }, [adkAvailable]);
-
-  const regenerateImage = async (id: string, imagePrompt: string) => {
+  const regenerateImage = async (id: string, imagePrompt: string): Promise<string | undefined> => {
     setStoryParts(parts => parts.map(p => p.id === id ? { ...p, isLoading: true, error: undefined } : p));
-    
-    try {
-      // Route through ADK server when available (keeps API key server-side)
-      if (adkAvailable) {
-        addAgentActivity(`generate_image → ${imagePrompt.substring(0, 40)}...`);
-        const result = await generateImageViaADK(imagePrompt);
-        if (result.status === 'success' && result.imageDataUri) {
-          setStoryParts(parts => parts.map(p => p.id === id ? { ...p, url: result.imageDataUri!, isLoading: false } : p));
-          addAgentActivity(`✓ Image generated via Cloud Run`);
-          return;
-        }
-        // Fall through to direct call if server fails
-        console.warn('ADK server image gen failed, falling back to direct:', result.error);
-      }
 
-      // Fallback: direct client-side Gemini call
-      const apiKey = getApiKey();
-      if (!apiKey) throw new Error("API Key is missing.");
-      const ai = new GoogleGenAI({ apiKey: apiKey as string });
-      const imageResponse = await ai.models.generateContent({
-        model: 'gemini-3.1-flash-image-preview',
-        contents: imagePrompt,
-        config: { imageConfig: { aspectRatio: "16:9", imageSize: "1K" } }
-      });
-      
-      const part = imageResponse.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
-      if (part?.inlineData) {
-        const url = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
-        setStoryParts(parts => parts.map(p => p.id === id ? { ...p, url, isLoading: false } : p));
-      } else {
-        setStoryParts(parts => parts.map(p => p.id === id ? { ...p, isLoading: false, error: 'Failed to generate image' } : p));
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        if (adkAvailable) {
+          if (attempt === 0) addAgentActivity(`generate_image → ${imagePrompt.substring(0, 40)}...`);
+          const result = await generateImageViaADK(imagePrompt);
+          if (result.status === 'success' && result.imageDataUri) {
+            setStoryParts(parts => parts.map(p => p.id === id ? { ...p, url: result.imageDataUri!, isLoading: false } : p));
+            addAgentActivity(`✓ Image generated via Cloud Run`);
+            return result.imageDataUri;
+          }
+          if (attempt < maxRetries - 1) {
+            addAgentActivity(`⟳ Image retry ${attempt + 2}/${maxRetries}...`);
+            await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+            continue;
+          }
+          console.warn('ADK server image gen failed after retries:', result.error);
+        }
+
+        const apiKey = getApiKey();
+        if (!apiKey) {
+          setStoryParts(parts => parts.map(p => p.id === id ? { ...p, isLoading: false, error: 'Image generation failed — click Try Again' } : p));
+          return undefined;
+        }
+        const ai = new GoogleGenAI({ apiKey: apiKey as string });
+        const imageResponse = await ai.models.generateContent({
+          model: 'gemini-3.1-flash-image-preview',
+          contents: imagePrompt,
+          config: { imageConfig: { aspectRatio: "16:9", imageSize: "1K" } }
+        });
+
+        const part = imageResponse.candidates?.[0]?.content?.parts?.find(p => p.inlineData);
+        if (part?.inlineData) {
+          const url = `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`;
+          setStoryParts(parts => parts.map(p => p.id === id ? { ...p, url, isLoading: false } : p));
+          return url;
+        }
+        if (attempt < maxRetries - 1) { await new Promise(r => setTimeout(r, 1500 * (attempt + 1))); continue; }
+        setStoryParts(parts => parts.map(p => p.id === id ? { ...p, isLoading: false, error: 'Image generation failed — click Try Again' } : p));
+      } catch (err: any) {
+        if (attempt < maxRetries - 1 && (err.message?.includes('429') || err.message?.includes('RESOURCE_EXHAUSTED') || err.message?.includes('500'))) {
+          await new Promise(r => setTimeout(r, 2000 * (attempt + 1)));
+          continue;
+        }
+        console.error("Image generation error:", err);
+        setStoryParts(parts => parts.map(p => p.id === id ? { ...p, isLoading: false, error: 'Image generation failed — click Try Again' } : p));
       }
-    } catch (err) {
-      console.error("Image generation error:", err);
-      setStoryParts(parts => parts.map(p => p.id === id ? { ...p, isLoading: false, error: 'Failed to generate image' } : p));
     }
+
+    return undefined;
   };
 
   const generateStory = async () => {
@@ -595,17 +736,101 @@ export default function App() {
     if (activeAudio) { activeAudio.pause(); setActiveAudio(null); }
 
     try {
-      const apiKey = getApiKey();
-      if (!apiKey) throw new Error("API Key is missing. Please select an API Key.");
-      const ai = new GoogleGenAI({ apiKey: apiKey as string });
-      
-      if (adkAvailable) addAgentActivity('OmniWeaveDirector → generating story...');
-      
-      const responseStream = await ai.models.generateContentStream({
-        model: 'gemini-3.1-pro-preview',
-        contents: `Create a rich, immersive story or presentation about: "${prompt}"`,
-        config: {
-          systemInstruction: `You are OmniWeave, a master cinematic director and storyteller.
+      const streamState = createStoryStreamState();
+      const pendingImageParts: { id: string; prompt: string }[] = [];
+
+      const syncStoryParts = (newParts: StoryPart[]) => {
+        if (streamState.parts.length > 0) {
+          setStoryParts([...streamState.parts] as StoryPart[]);
+        }
+
+        newParts.forEach((part) => {
+          if (part.type === 'image' && part.prompt) {
+            pendingImageParts.push({ id: part.id, prompt: part.prompt });
+          }
+        });
+      };
+
+      const applyStoryText = (text: string) => {
+        if (!text) return;
+        const { newParts } = appendStoryChunk(streamState, text);
+        if (newParts.length > 0) {
+          syncStoryParts(newParts as StoryPart[]);
+        }
+      };
+
+      const finalizeStoryText = () => {
+        const { newParts } = flushStoryChunk(streamState);
+        if (newParts.length > 0 || streamState.parts.length > 0) {
+          syncStoryParts(newParts as StoryPart[]);
+        }
+      };
+
+      if (adkAvailable) {
+        addAgentActivity('StoryPipeline → ADK session started');
+
+        const seenAuthors = new Set<string>();
+        let adkError = '';
+        let legacyTextAuthor: string | null = null;
+
+        await generateStoryViaADK(prompt, (event) => {
+          if (event.error) {
+            adkError = event.error;
+            return;
+          }
+
+          if (event.replaceText) {
+            streamState.parts = [];
+            streamState.buffer = '';
+            streamState.nextPartIndex = 0;
+            setStoryParts([]);
+          }
+
+          if (event.author && !seenAuthors.has(event.author)) {
+            seenAuthors.add(event.author);
+            const phaseLabel =
+              event.author === 'StoryWriter'
+                ? 'drafting story...'
+                : event.author === 'StoryReviewer'
+                  ? 'reviewing consistency...'
+                  : 'processing...';
+            addAgentActivity(`${event.author} → ${phaseLabel}`);
+          }
+
+          event.toolCalls?.forEach((toolCall) => {
+            addAgentActivity(`${toolCall.name} → requested by ADK`);
+          });
+
+          event.toolResponses?.forEach((toolResponse) => {
+            addAgentActivity(`✓ ${toolResponse.name} completed`);
+          });
+
+          if (event.renderText && event.text) {
+            applyStoryText(event.text);
+          } else if (!('renderText' in event) && event.text) {
+            const candidateAuthor = event.author || 'legacy';
+            if (!legacyTextAuthor) {
+              legacyTextAuthor = candidateAuthor;
+            }
+            if (candidateAuthor === legacyTextAuthor) {
+              applyStoryText(event.text);
+            }
+          }
+        });
+
+        if (adkError) {
+          throw new Error(adkError);
+        }
+      } else {
+        const apiKey = getApiKey();
+        if (!apiKey) throw new Error("API Key is missing. Set VITE_GEMINI_API_KEY or connect the ADK server.");
+
+        const ai = new GoogleGenAI({ apiKey: apiKey as string });
+        const responseStream = await ai.models.generateContentStream({
+          model: 'gemini-3.1-pro-preview',
+          contents: `Create a rich, immersive story or presentation about: "${prompt}"`,
+          config: {
+            systemInstruction: `You are OmniWeave, a master cinematic director and storyteller.
 
 CRITICAL INSTRUCTIONS FOR IMAGERY (CONSISTENCY):
 1. Choose a specific visual art style for the story (e.g., '3D Pixar style', 'Dark fantasy digital painting', 'Cinematic 35mm photography').
@@ -620,85 +845,28 @@ CRITICAL INSTRUCTIONS FOR VOICES (CHARACTER MATCHING):
 5. Immediately after an [IMAGE: ...] prompt, the very next line of text MUST begin with a speaker label.
 
 GROUNDING: Base your story on internally consistent world-building. Character names, settings, and visual descriptions must remain consistent throughout the entire story.`,
-        }
-      });
-
-      if (adkAvailable) addAgentActivity('StoryWriter → streaming content...');
-
-      let currentParts: StoryPart[] = [];
-      let partIndex = 0;
-      let buffer = '';
-
-      const appendText = (text: string) => {
-        if (!text) return;
-        const lastPart = currentParts[currentParts.length - 1];
-        if (lastPart && lastPart.type === 'text') {
-          currentParts[currentParts.length - 1] = { ...lastPart, text: lastPart.text + text };
-        } else {
-          currentParts.push({ type: 'text', text, id: `txt-${partIndex++}` });
-        }
-        setStoryParts([...currentParts]);
-      };
-
-      const appendImagePlaceholder = (imagePrompt: string) => {
-        const id = `img-${partIndex++}`;
-        const newPart: StoryPart = { type: 'image', url: '', id, isLoading: true, prompt: imagePrompt };
-        currentParts.push(newPart);
-        setStoryParts([...currentParts]);
-        regenerateImage(id, imagePrompt);
-      };
-
-      for await (const chunk of responseStream) {
-        const text = chunk.text;
-        if (!text) continue;
-        
-        buffer += text;
-        
-        let safeLength = buffer.length;
-        const lastOpenBracket = buffer.lastIndexOf('[');
-        if (lastOpenBracket !== -1) {
-          const closingBracket = buffer.indexOf(']', lastOpenBracket);
-          if (closingBracket === -1) safeLength = lastOpenBracket;
-        }
-        
-        const processable = buffer.substring(0, safeLength);
-        buffer = buffer.substring(safeLength);
-        
-        if (processable) {
-          const regex = /\[IMAGE:\s*(.*?)\s*\]/g;
-          let match;
-          let lastIndex = 0;
-          
-          while ((match = regex.exec(processable)) !== null) {
-            if (match.index > lastIndex) appendText(processable.substring(lastIndex, match.index));
-            appendImagePlaceholder(match[1]);
-            lastIndex = regex.lastIndex;
           }
-          
-          if (lastIndex < processable.length) appendText(processable.substring(lastIndex));
+        });
+
+        for await (const chunk of responseStream) {
+          if (chunk.text) {
+            applyStoryText(chunk.text);
+          }
         }
       }
-      
-      if (buffer) {
-        const regex = /\[IMAGE:\s*(.*?)\s*\]/g;
-        let match;
-        let lastIndex = 0;
-        while ((match = regex.exec(buffer)) !== null) {
-          if (match.index > lastIndex) appendText(buffer.substring(lastIndex, match.index));
-          appendImagePlaceholder(match[1]);
-          lastIndex = regex.lastIndex;
-        }
-        if (lastIndex < buffer.length) appendText(buffer.substring(lastIndex));
+
+      finalizeStoryText();
+
+      if (streamState.parts.length === 0) throw new Error("No content generated.");
+
+      // Generate images 2 at a time to balance speed vs rate limits
+      for (let i = 0; i < pendingImageParts.length; i += 2) {
+        const batch = pendingImageParts.slice(i, i + 2);
+        await Promise.allSettled(batch.map(img => regenerateImage(img.id, img.prompt)));
       }
-      
-      if (currentParts.length === 0) throw new Error("No content generated.");
-
-      if (adkAvailable) addAgentActivity('StoryReviewer → validating consistency...');
-
-      const newParts = currentParts;
 
       try {
-        const firstImagePart = newParts.find(p => p.type === 'image') as { type: 'image', url: string, prompt?: string } | undefined;
+        const firstImagePart = streamState.parts.find(p => p.type === 'image') as { type: 'image', url: string, prompt?: string } | undefined;
         
         if (adkAvailable) {
           addAgentActivity('compute_embedding → multimodal fingerprint...');
@@ -716,6 +884,9 @@ GROUNDING: Base your story on internally consistent world-building. Character na
             addAgentActivity(`✓ Embedding computed via Cloud Run (${embedResult.dimensions}D)`);
           }
         } else {
+          const apiKey = getApiKey();
+          if (!apiKey) throw new Error("API Key is missing. Set VITE_GEMINI_API_KEY or connect the ADK server.");
+          const ai = new GoogleGenAI({ apiKey: apiKey as string });
           // Direct embedding
           const embedContents: any[] = [prompt];
           if (firstImagePart?.url) {
@@ -738,7 +909,6 @@ GROUNDING: Base your story on internally consistent world-building. Character na
     } catch (err: any) {
       console.error(err);
       if (err.message?.includes("Requested entity was not found") || err.message?.includes("PERMISSION_DENIED") || err.message?.includes("403")) {
-        setHasKey(false);
         setError("API Key error: The provided key does not have permission for these models. Please ensure the Generative Language API is enabled and unrestricted.");
       } else {
         setError(err.message || "An error occurred during generation.");
@@ -770,9 +940,10 @@ GROUNDING: Base your story on internally consistent world-building. Character na
         setStoryParts(parts => parts.map(p => p.id === partId ? { ...p, isPlaying: false } : p));
         setActiveAudio(null);
         if (autoNextIndex !== undefined) {
-          const nextTextPartIndex = storyParts.findIndex((p, idx) => idx > autoNextIndex && p.type === 'text');
+          const currentParts = storyPartsRef.current;
+          const nextTextPartIndex = currentParts.findIndex((p, idx) => idx > autoNextIndex && p.type === 'text');
           if (nextTextPartIndex !== -1) {
-            const nextPart = storyParts[nextTextPartIndex];
+            const nextPart = currentParts[nextTextPartIndex];
             if (nextPart.type === 'text') { setCurrentPlayIndex(nextTextPartIndex); playAudio(nextPart.id, nextPart.text, nextTextPartIndex); }
           } else { setIsAutoPlaying(false); setCurrentPlayIndex(-1); }
         }
@@ -785,35 +956,6 @@ GROUNDING: Base your story on internally consistent world-building. Character na
     setStoryParts(parts => parts.map(p => p.id === partId ? { ...p, isLoadingAudio: true } : p));
     
     try {
-      // Check Firebase audio cache first
-      const textHash = await hashText(text);
-      const cacheRef = doc(db, 'audio_cache', textHash);
-      try {
-        const cacheSnap = await getDoc(cacheRef);
-        if (cacheSnap.exists()) {
-          const cachedBase64 = cacheSnap.data().base64Data;
-          const wavUrl = createWavFile(cachedBase64, 24000);
-          setStoryParts(parts => parts.map(p => p.id === partId ? { ...p, isLoadingAudio: false, audioUrl: wavUrl, audioBase64: cachedBase64, isPlaying: true } : p));
-          const audio = new Audio(wavUrl);
-          setActiveAudio(audio);
-          audio.onended = () => {
-            setStoryParts(parts => parts.map(p => p.id === partId ? { ...p, isPlaying: false } : p));
-            setActiveAudio(null);
-            if (autoNextIndex !== undefined) {
-              const nextTextPartIndex = storyParts.findIndex((p, idx) => idx > autoNextIndex && p.type === 'text');
-              if (nextTextPartIndex !== -1) { const nextPart = storyParts[nextTextPartIndex]; if (nextPart.type === 'text') { setCurrentPlayIndex(nextTextPartIndex); playAudio(nextPart.id, nextPart.text, nextTextPartIndex); } }
-              else { setIsAutoPlaying(false); setCurrentPlayIndex(-1); }
-            }
-          };
-          await audio.play();
-          return;
-        }
-      } catch (e) { console.error("Cache check failed", e); }
-
-      const apiKey = getApiKey();
-      if (!apiKey) throw new Error("API Key is missing.");
-      const ai = new GoogleGenAI({ apiKey: apiKey as string });
-
       if (adkAvailable) addAgentActivity('generate_speech → TTS streaming...');
 
       // Build voice map — gender-aware assignment
@@ -861,8 +1003,9 @@ GROUNDING: Base your story on internally consistent world-building. Character na
         setStoryParts(parts => parts.map(p => p.id === partId ? { ...p, isPlaying: false } : p));
         setActiveAudio(null);
         if (autoNextIndex !== undefined) {
-          const nextTextPartIndex = storyParts.findIndex((p, idx) => idx > autoNextIndex && p.type === 'text');
-          if (nextTextPartIndex !== -1) { const nextPart = storyParts[nextTextPartIndex]; if (nextPart.type === 'text') { setCurrentPlayIndex(nextTextPartIndex); playAudio(nextPart.id, nextPart.text, nextTextPartIndex); } }
+          const currentParts = storyPartsRef.current;
+          const nextTextPartIndex = currentParts.findIndex((p, idx) => idx > autoNextIndex && p.type === 'text');
+          if (nextTextPartIndex !== -1) { const nextPart = currentParts[nextTextPartIndex]; if (nextPart.type === 'text') { setCurrentPlayIndex(nextTextPartIndex); playAudio(nextPart.id, nextPart.text, nextTextPartIndex); } }
           else { setIsAutoPlaying(false); setCurrentPlayIndex(-1); }
         }
       });
@@ -871,8 +1014,55 @@ GROUNDING: Base your story on internally consistent world-building. Character na
       setStoryParts(parts => parts.map(p => p.id === partId ? { ...p, isLoadingAudio: false, isPlaying: true } : p));
 
       let fullBinary = '';
-      
+      let usedBackendTTS = false;
+
       try {
+        if (adkAvailable) {
+          usedBackendTTS = true;
+          const adkUrl = getADKServerURL();
+          for (const chunk of apiChunks) {
+            if (!streamer.isPlaying) break;
+            const speakers = chunk.speakers.map(s => ({ name: s, voice: currentVoiceMap[s] || 'Zephyr' }));
+            // For single-speaker, strip labels so TTS doesn't read "Narrator:" aloud
+            const cleanedText = chunk.speakers.length <= 1
+              ? chunk.text.replace(/^\s*(?:\*\*|\*)?[A-Z][a-zA-Z0-9_ ]+(?:\*\*|\*)?:\s*/gm, '')
+              : chunk.text;
+            const ttsPrompt = chunk.speakers.length > 1
+              ? `TTS the following conversation between ${chunk.speakers.join(' and ')}:\n\n${cleanedText}`
+              : cleanedText;
+            const res = await fetch(`${adkUrl}/api/tts`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ script: ttsPrompt, speakers }),
+            });
+            if (!res.ok) throw new Error(`TTS backend error: ${res.status}`);
+            if (!res.body) throw new Error('No TTS response body');
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let sseBuffer = '';
+            while (true) {
+              const { done: streamDone, value } = await reader.read();
+              if (streamDone) break;
+              sseBuffer += decoder.decode(value, { stream: true });
+              const sseLines = sseBuffer.split('\n');
+              sseBuffer = sseLines.pop() || '';
+              for (const sseLine of sseLines) {
+                if (!sseLine.startsWith('data: ')) continue;
+                try {
+                  const evt = JSON.parse(sseLine.slice(6));
+                  if (evt.done) break;
+                  if (evt.error) throw new Error(evt.error);
+                  if (evt.audio) { streamer.addChunk(evt.audio); fullBinary += atob(evt.audio); }
+                } catch (e) { if (!(e instanceof SyntaxError)) throw e; }
+              }
+            }
+          }
+        }
+
+        if (!usedBackendTTS) {
+        const apiKey = getApiKey();
+        if (!apiKey) throw new Error("Narration requires VITE_GEMINI_API_KEY or an ADK server connection.");
+        const ai = new GoogleGenAI({ apiKey: apiKey as string });
         const streamPromises = apiChunks.map(chunk => {
           const speakerVoiceConfigs = chunk.speakers.map(speaker => ({
             speaker, voiceConfig: { prebuiltVoiceConfig: { voiceName: currentVoiceMap[speaker] || 'Zephyr' } }
@@ -880,11 +1070,14 @@ GROUNDING: Base your story on internally consistent world-building. Character na
           let speechConfig: any = {};
           if (speakerVoiceConfigs.length === 1) speechConfig = { voiceConfig: speakerVoiceConfigs[0].voiceConfig };
           else if (speakerVoiceConfigs.length >= 2) speechConfig = { multiSpeakerVoiceConfig: { speakerVoiceConfigs: speakerVoiceConfigs.slice(0, 2) } };
-          const ttsPrompt = chunk.speakers.length > 1 
-            ? `TTS the following conversation between ${chunk.speakers.join(' and ')}:\n\n${chunk.text}`
-            : `Read the following script:\n\n${chunk.text}`;
+          const cleanedText = chunk.speakers.length <= 1
+            ? chunk.text.replace(/^\s*(?:\*\*|\*)?[A-Z][a-zA-Z0-9_ ]+(?:\*\*|\*)?:\s*/gm, '')
+            : chunk.text;
+          const ttsPrompt = chunk.speakers.length > 1
+            ? `TTS the following conversation between ${chunk.speakers.join(' and ')}:\n\n${cleanedText}`
+            : cleanedText;
           return ai.models.generateContentStream({
-            model: "gemini-2.5-flash-preview-tts",
+            model: "gemini-2.5-pro-preview-tts",
             contents: [{ parts: [{ text: ttsPrompt }] }],
             config: { responseModalities: [Modality.AUDIO], speechConfig },
           });
@@ -899,16 +1092,14 @@ GROUNDING: Base your story on internally consistent world-building. Character na
             if (base64Audio) { streamer.addChunk(base64Audio); fullBinary += atob(base64Audio); }
           }
         }
-        
+        }
+
         streamer.markFinished();
         
         if (fullBinary && streamer.isPlaying) {
           const fullBase64 = btoa(fullBinary);
           const wavUrl = createWavFile(fullBase64, 24000);
           setStoryParts(parts => parts.map(p => p.id === partId ? { ...p, audioUrl: wavUrl, audioBase64: fullBase64 } : p));
-          if (fullBase64.length < 900000) {
-            await setDoc(cacheRef, { base64Data: fullBase64, createdAt: serverTimestamp() }).catch(e => console.error("Failed to cache audio", e));
-          }
         }
         if (adkAvailable) addAgentActivity('✓ TTS narration complete');
       } catch (err) {
@@ -918,6 +1109,9 @@ GROUNDING: Base your story on internally consistent world-building. Character na
       }
     } catch (err) {
       console.error("TTS Error:", err);
+      if (err instanceof Error) {
+        showToast(err.message, 'error');
+      }
       setIsAutoPlaying(false);
       setStoryParts(parts => parts.map(p => p.id === partId ? { ...p, isLoadingAudio: false } : p));
     }
@@ -926,53 +1120,110 @@ GROUNDING: Base your story on internally consistent world-building. Character na
   const startBackgroundMusic = async () => {
     if (!musicEnabled) return;
     try {
-      const apiKey = getApiKey();
-      if (!apiKey) return;
-      const ai = new GoogleGenAI({ apiKey: apiKey as string });
-
-      // Extract mood from story text
       const storyText = storyParts.filter(p => p.type === 'text').map(p => (p as any).text).join('\n');
       const moodPrompt = extractMoodPrompt(storyText);
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
+      const gainNode = audioCtx.createGain();
+      gainNode.gain.value = 0.12;
+      gainNode.connect(audioCtx.destination);
 
-      const session = await (ai as any).live.music.connect({
-        model: 'models/lyria-realtime-exp',
-        callbacks: {
-          onAudioData: (data: { data: string }) => {
-            // Stream music through WebAudio at low volume
-            try {
-              const ctx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
-              const raw = atob(data.data);
-              const bytes = new Uint8Array(raw.length);
-              for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-              const float32 = new Float32Array(bytes.length / 2);
-              const dv = new DataView(bytes.buffer);
-              for (let i = 0; i < float32.length; i++) float32[i] = dv.getInt16(i * 2, true) / 32768;
-              const buffer = ctx.createBuffer(1, float32.length, 48000);
-              buffer.getChannelData(0).set(float32);
-              const source = ctx.createBufferSource();
-              source.buffer = buffer;
-              const gainNode = ctx.createGain();
-              gainNode.gain.value = 0.15;
-              source.connect(gainNode).connect(ctx.destination);
-              source.start();
-            } catch { /* silent fallback */ }
-          },
-        },
-      });
+      // Track next start time to prevent overlapping buffers (gapless scheduling)
+      let musicNextStartTime = audioCtx.currentTime;
 
-      await session.setWeightedPrompts([{ text: moodPrompt, weight: 1.0 }]);
-      await session.play();
-      setMusicSession(session);
-      if (adkAvailable) addAgentActivity('lyria-realtime → Background music streaming');
+      const playMusicChunk = (base64: string) => {
+        try {
+          const raw = atob(base64);
+          const bytes = new Uint8Array(raw.length);
+          for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+          const float32 = new Float32Array(bytes.length / 2);
+          const dv = new DataView(bytes.buffer);
+          for (let i = 0; i < float32.length; i++) float32[i] = dv.getInt16(i * 2, true) / 32768;
+          const buffer = audioCtx.createBuffer(1, float32.length, 48000);
+          buffer.getChannelData(0).set(float32);
+          const source = audioCtx.createBufferSource();
+          source.buffer = buffer;
+          source.connect(gainNode);
+          const startTime = Math.max(musicNextStartTime, audioCtx.currentTime);
+          source.start(startTime);
+          musicNextStartTime = startTime + buffer.duration;
+        } catch { /* silent */ }
+      };
+
+      if (adkAvailable) {
+        // Route through backend — no browser API key needed
+        const adkUrl = getADKServerURL();
+        const musicAbort = new AbortController();
+        const musicTimeout = setTimeout(() => musicAbort.abort(), 20000);
+        let res: Response;
+        try {
+          res = await fetch(`${adkUrl}/api/music`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mood: moodPrompt }),
+            signal: musicAbort.signal,
+          });
+        } catch {
+          clearTimeout(musicTimeout);
+          console.warn('Background music not available (timeout or network)');
+          return;
+        }
+        clearTimeout(musicTimeout);
+        if (!res.ok || !res.body) {
+          console.warn('Background music not available on this deployment');
+          return;
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let sseBuffer = '';
+        const abortController = new AbortController();
+
+        // Read SSE stream in background
+        const readStream = async () => {
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              sseBuffer += decoder.decode(value, { stream: true });
+              const lines = sseBuffer.split('\n');
+              sseBuffer = lines.pop() || '';
+              for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                try {
+                  const evt = JSON.parse(line.slice(6));
+                  if (evt.done || evt.error) return;
+                  if (evt.audio) playMusicChunk(evt.audio);
+                } catch { /* skip parse errors */ }
+              }
+            }
+          } catch { /* stream closed */ }
+        };
+        readStream();
+        setMusicSession({ reader, abort: () => reader.cancel() });
+        addAgentActivity('lyria-realtime → Background music streaming');
+      } else {
+        // Direct browser connection (requires API key)
+        const apiKey = getApiKey();
+        if (!apiKey) { showToast('Background music requires an ADK server or API key', 'error'); return; }
+        const ai = new GoogleGenAI({ apiKey: apiKey as string });
+        const session = await (ai as any).live.music.connect({
+          model: 'models/lyria-realtime-exp',
+          callbacks: { onAudioData: (data: { data: string }) => playMusicChunk(data.data) },
+        });
+        await session.setWeightedPrompts([{ text: moodPrompt, weight: 1.0 }]);
+        await session.play();
+        setMusicSession(session);
+      }
     } catch (err) {
       console.warn('Lyria RealTime not available:', err);
-      // Silently degrade — Lyria may not be enabled for this API key
     }
   };
 
   const stopBackgroundMusic = async () => {
     if (musicSession) {
-      try { await musicSession.pause(); } catch { /* ignore */ }
+      try {
+        if (musicSession.abort) musicSession.abort();
+        else if (musicSession.pause) await musicSession.pause();
+      } catch { /* ignore */ }
       setMusicSession(null);
     }
   };
@@ -998,298 +1249,572 @@ GROUNDING: Base your story on internally consistent world-building. Character na
   };
 
   return (
-    <div className="min-h-screen bg-[#f5f5f0] text-[#2c2c2c] relative overflow-x-hidden selection:bg-[#8b2e16]/30">
-      <div className="atmosphere"></div>
+    <div className="min-h-screen relative overflow-x-hidden" style={{ background: 'var(--frame-base)', color: 'var(--frame-text)' }}>
 
-      {/* Toast Notification */}
+      {/* Story Progress Bar */}
+      {showProgress && (
+        <div className="story-progress" style={{ width: `${scrollProgress * 100}%` }} />
+      )}
+
+      {/* Toast */}
       <AnimatePresence>
         {toast && (
-          <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}
-            className={`fixed top-20 left-1/2 -translate-x-1/2 z-[100] px-6 py-3 rounded-xl shadow-lg text-sm font-medium flex items-center gap-2 ${
-              toast.type === 'success' ? 'bg-emerald-600 text-white' : 'bg-red-600 text-white'
-            }`}>
-            {toast.type === 'success' ? <CheckCircle2 className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+          <motion.div initial={{ opacity: 0, y: -20, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className={`toast ${toast.type === 'success' ? 'toast-success' : 'toast-error'}`}>
+            {toast.type === 'success' ? <CheckCircle2 className="w-3.5 h-3.5" /> : <AlertCircle className="w-3.5 h-3.5" />}
             {toast.message}
           </motion.div>
         )}
       </AnimatePresence>
 
-      <header className="fixed top-0 left-0 right-0 z-50 glass-panel border-x-0 border-t-0 rounded-none px-4 md:px-6 py-3 md:py-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 md:gap-0">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-[#8b2e16] to-[#5A5A40] flex items-center justify-center">
-            <Sparkles className="w-4 h-4 text-[#f5f5f0]" />
-          </div>
-          <h1 className="text-xl font-serif tracking-tight">OmniWeave</h1>
-        </div>
-        <div className="flex items-center gap-4 overflow-x-auto no-scrollbar pb-1 md:pb-0 justify-start md:justify-end w-full md:w-auto">
-          <button onClick={loadLibrary} className="text-xs font-medium text-[#2c2c2c]/80 hover:text-[#2c2c2c] flex items-center gap-1 bg-black/5 px-3 py-1.5 rounded-full transition-colors mr-4"><Library className="w-3.5 h-3.5" /> Library</button>
-          {/* ADK Server Status Badge */}
-          <div className={`text-[10px] md:text-xs font-mono px-2.5 md:px-3 py-1 md:py-1.5 rounded-full border flex items-center gap-1 whitespace-nowrap ${
-            adkAvailable 
-              ? 'text-emerald-700 bg-emerald-50 border-emerald-200' 
-              : 'text-[#8b2e16]/80 bg-[#fdfbf7]/60 border-black/5'
-          }`}>
-            <CheckCircle2 className="w-3 h-3" />
-            {adkAvailable ? 'ADK Agent Connected' : 'Direct Mode'}
-          </div>
-          <div className="text-[10px] md:text-xs font-mono text-[#8b2e16]/80 bg-[#fdfbf7]/60 px-2.5 md:px-3 py-1 md:py-1.5 rounded-full border border-black/5 flex items-center gap-1 whitespace-nowrap">
-            <CheckCircle2 className="w-3 h-3 text-emerald-500" /> 7 Gemini Models
-          </div>
-          <div className="text-[10px] md:text-xs font-mono text-[#8b2e16]/80 bg-[#fdfbf7]/60 px-2.5 md:px-3 py-1 md:py-1.5 rounded-full border border-black/5 flex items-center gap-1 whitespace-nowrap">
-            <CheckCircle2 className="w-3 h-3 text-emerald-500" /> Multi-Cast TTS
+      {/* Navigation — editorial, minimal */}
+      <header ref={navRef} className="floating-nav">
+        <a href="#" className="nav-brand">Omni<span>Weave</span></a>
+        <div className="nav-links">
+          <button onClick={loadLibrary} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Library className="w-3 h-3" /> Library
+          </button>
+          <div style={{
+            fontFamily: 'var(--font-mono)', fontSize: '0.6rem', padding: '4px 10px',
+            borderRadius: 'var(--radius-sm)', display: 'flex', alignItems: 'center', gap: '6px',
+            background: adkAvailable ? 'rgba(76,175,80,0.12)' : 'rgba(255,255,255,0.05)',
+            border: `1px solid ${adkAvailable ? 'rgba(76,175,80,0.25)' : 'var(--frame-ghost)'}`,
+            color: adkAvailable ? '#81c784' : 'var(--frame-dim)'
+          }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: adkAvailable ? '#81c784' : 'var(--frame-dim)' }}></span>
+            {adkAvailable ? '8 Models Active' : 'Direct Mode'}
           </div>
         </div>
       </header>
 
-      <main className="pt-28 md:pt-32 pb-32 px-4 md:px-6 max-w-4xl mx-auto">
+      <main className="pt-24 pb-32 px-4 md:px-6">
         {showLibrary ? (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mt-20">
-            <div className="flex items-center justify-between mb-8">
-              <h2 className="text-4xl font-serif font-light tracking-tight">Story <span className="italic text-[#8b2e16]">Library</span></h2>
-              <button onClick={() => setShowLibrary(false)} className="text-sm text-[#2c2c2c]/70 hover:text-[#2c2c2c] flex items-center gap-2"><ArrowRight className="w-4 h-4 rotate-180" /> Back to Weaving</button>
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} style={{ maxWidth: 1000, margin: '48px auto 0', padding: '0 clamp(24px, 4vw, 40px)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 48 }}>
+              <h2 className="section-title">Your <em style={{ fontStyle: 'italic', color: 'var(--vermillion)' }}>Library</em></h2>
+              <button onClick={() => setShowLibrary(false)} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ transform: 'rotate(180deg)', display: 'inline-flex' }}><ArrowRight className="w-4 h-4" /></span> Back</button>
             </div>
             {isLoadingStory ? (
-              <div className="flex flex-col items-center justify-center py-20 gap-4">
-                <div className="w-8 h-8 border-2 border-[#8b2e16] border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-[#2c2c2c]/70 font-serif italic">Loading story and images...</p>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '96px 0', gap: 16 }}>
+                <div className="generating-dot" style={{ width: 12, height: 12 }}></div>
+                <p style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', color: 'var(--frame-dim)' }}>Retrieving story...</p>
               </div>
             ) : savedStories.length === 0 ? (
-              <div className="text-center py-20 text-[#2c2c2c]/60 font-serif italic">No stories yet. Be the first to weave one.</div>
+              <div style={{ textAlign: 'center', padding: '96px 0', fontFamily: 'var(--font-display)', fontStyle: 'italic', fontSize: '1.1rem', color: 'var(--frame-dim)' }}>No stories yet. Create your first one.</div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="library-grid">
                 {savedStories.map((story) => (
-                  <div key={story.id} className="glass-panel p-6 rounded-2xl flex flex-col gap-4 hover:border-[#8b2e16]/30 transition-colors cursor-pointer" onClick={() => loadStory(story)}>
-                    <h3 className="text-xl font-serif font-medium text-[#1a1a1a] line-clamp-2">{story.title}</h3>
-                    <div className="text-xs text-[#2c2c2c]/60 font-mono">{new Date(story.createdAt?.seconds * 1000).toLocaleDateString()}</div>
-                  </div>
+                  <motion.div key={story.id} whileHover={{ y: -4 }} className="library-card" onClick={() => loadStory(story)}>
+                    <div className="library-card-title">{story.title}</div>
+                    <div className="library-card-meta">{new Date(story.createdAt?.seconds * 1000).toLocaleDateString()}</div>
+                  </motion.div>
                 ))}
               </div>
             )}
           </motion.div>
         ) : (
           <>
+            {/* HERO — cinematic title card */}
             <AnimatePresence>
               {storyParts.length === 0 && !isGenerating && (
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20, filter: 'blur(10px)' }} className="mt-20">
-                  <h2 className="text-4xl md:text-7xl font-serif font-light tracking-tight mb-6 leading-[1.1]">
-                    What story shall we <br/><span className="italic text-[#8b2e16]">weave today?</span>
-                  </h2>
-                  
-                  <div className="glass-panel p-2 rounded-2xl flex flex-col gap-2 transition-all focus-within:border-[#8b2e16]/30 focus-within:shadow-[0_0_30px_rgba(139,46,22,0.1)]">
-                    <textarea id="prompt-input" value={prompt} onChange={(e) => setPrompt(e.target.value)}
-                      placeholder="A cyberpunk detective exploring a neon-lit underwater city..."
-                      className="w-full bg-transparent border-none outline-none resize-none p-3 md:p-4 text-base md:text-lg text-[#2c2c2c] placeholder:text-[#2c2c2c]/20 min-h-[120px]"
-                      onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) generateStory(); }}
-                    />
-                    <div className="flex justify-end md:justify-between items-center px-2 md:px-4 pb-2">
-                      <span className="hidden md:inline text-xs text-[#2c2c2c]/60 font-mono">Press Cmd+Enter to generate</span>
-                      <button id="generate-btn" onClick={generateStory} disabled={!prompt.trim() || isGenerating}
-                        className="w-full md:w-auto px-6 py-3 md:py-2.5 bg-[#8b2e16] text-[#fdfbf7] font-medium rounded-xl hover:bg-[#8b2e16]/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                        Generate <Sparkles className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-                  
-                  {/* Prompt Suggestions */}
-                  <div className="mt-8 grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {PROMPT_SUGGESTIONS.map((s) => (
-                      <button key={s.label} onClick={() => setPrompt(s.prompt)}
-                        className="text-left p-3 rounded-xl bg-black/[0.03] hover:bg-black/[0.07] border border-black/5 hover:border-[#8b2e16]/20 transition-all group">
-                        <span className="text-lg mb-1 block">{s.icon}</span>
-                        <span className="text-xs font-medium text-[#2c2c2c]/80 group-hover:text-[#8b2e16] transition-colors">{s.label}</span>
-                      </button>
-                    ))}
-                  </div>
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, y: -40, filter: 'blur(20px)' }} transition={{ duration: 0.6 }}
+                  className="hero-section">
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
+                    className="hero-overline">AI Cinematic Engine</motion.div>
 
-                  <div className="mt-12 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {FEATURE_CARDS.map((f) => (
-                      <div key={f.title} className="p-4 rounded-xl bg-black/[0.02] border border-black/5 flex gap-3 items-start">
-                        <div className="w-2 h-2 rounded-full mt-2 shrink-0" style={{ backgroundColor: f.color }} />
-                        <div>
-                          <h4 className="text-sm font-semibold text-[#1a1a1a]">{f.title}</h4>
-                          <p className="text-xs text-[#2c2c2c]/60 mt-0.5 leading-relaxed">{f.desc}</p>
-                          <span className="text-[10px] font-mono text-[#2c2c2c]/40 mt-1 inline-block">{f.model}</span>
+                  <motion.h2 initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
+                    className="hero-title">
+                    Every frame,<br/><em>composed.</em>
+                  </motion.h2>
+
+                  <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.5 }}
+                    className="hero-subtitle">
+                    Eight models orchestrated through two streaming protocols — live voice interaction, writing scripts, directing illustrations, casting voices, scoring scenes, and mapping narrative DNA.
+                  </motion.p>
+
+                  <motion.hr initial={{ width: 0 }} animate={{ width: 48 }} transition={{ delay: 0.6 }}
+                    className="hero-rule" />
+
+                  {/* Prompt Area — director's slate */}
+                  <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.7 }}
+                    className="prompt-area" style={{ width: '100%', maxWidth: 720 }}>
+                    <div className="prompt-wrapper">
+                      <div className="prompt-label">Scene Prompt</div>
+                      <textarea id="prompt-input" value={prompt} onChange={(e) => setPrompt(e.target.value)}
+                        className="prompt-textarea"
+                        placeholder="A lonely lighthouse keeper discovers messages in bottles from the future..."
+                        onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) generateStory(); }}
+                      />
+                      <div className="prompt-actions">
+                        <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', color: 'var(--frame-dim)', letterSpacing: '0.06em' }}>Ctrl+Enter</span>
+                        <div style={{ display: 'flex', gap: 10 }}>
+                          {adkAvailable && (
+                            <button onClick={startLiveMode} disabled={isLiveConnecting}
+                              className="btn-live" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                              {isLiveConnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><span className="live-dot" /><LiveIcon className="w-3.5 h-3.5" /></>}
+                              Live
+                            </button>
+                          )}
+                          <button id="generate-btn" onClick={generateStory} disabled={!prompt.trim() || isGenerating}
+                            className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            Compose <ArrowRight className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </div>
+                      {adkAvailable && (
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, gap: 24 }}>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.55rem', color: 'var(--frame-dim)', letterSpacing: '0.06em' }}>
+                            LIVE — speak &amp; interact in real time
+                          </span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.55rem', color: 'var(--frame-dim)', letterSpacing: '0.06em' }}>
+                            COMPOSE — full production pipeline
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+
+                  {/* Prompt Suggestions */}
+                  <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.9 }}
+                    style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 24, justifyContent: 'center', position: 'relative', zIndex: 1 }}>
+                    {PROMPT_SUGGESTIONS.map((s) => (
+                      <button key={s.label} onClick={() => setPrompt(s.prompt)}
+                        className="btn-secondary" style={{ fontSize: '0.7rem', padding: '8px 16px' }}>
+                        {s.label}
+                      </button>
                     ))}
-                  </div>
+                  </motion.div>
+
+                  {/* Pipeline — horizontal film strip with sprocket holes */}
+                  <motion.div ref={pipelineRef} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 1.1 }}
+                    className="pipeline-container" style={{ marginTop: 64, width: '100%', maxWidth: 780 }}>
+                    <div className="sprocket-row">
+                      {PIPELINE_STEPS.map((step) => (
+                        <div key={`top-${step.label}`} className="sprocket-hole" />
+                      ))}
+                    </div>
+                    <div className="film-strip">
+                      {PIPELINE_STEPS.map((step) => (
+                        <div key={step.label} className="pipeline-step visible">
+                          <div className="pipeline-step-label">{step.label}</div>
+                          <div className="pipeline-step-model">{step.model}</div>
+                          <div className="pipeline-step-desc">{step.desc}</div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="sprocket-row">
+                      {PIPELINE_STEPS.map((step) => (
+                        <div key={`bot-${step.label}`} className="sprocket-hole" />
+                      ))}
+                    </div>
+                  </motion.div>
 
                   {error && (
-                    <div className="mt-6 p-4 bg-red-900/10 border border-red-900/20 rounded-xl text-red-800 text-sm flex items-start gap-3">
-                      <AlertCircle className="w-5 h-5 shrink-0" /><p>{error}</p>
+                    <div className="error-banner" style={{ marginTop: 32 }}>
+                      <span style={{ display: 'inline-flex', marginRight: 8, verticalAlign: 'middle' }}><AlertCircle className="w-4 h-4" /></span>{error}
                     </div>
                   )}
                 </motion.div>
               )}
             </AnimatePresence>
 
+            {/* Live Mode Panel */}
             <AnimatePresence>
-              {isGenerating && storyParts.length === 0 && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex flex-col items-center justify-center py-32">
-                  <div className="relative w-24 h-24 flex items-center justify-center mb-8">
-                    <div className="absolute inset-0 border-t-2 border-[#8b2e16] rounded-full animate-spin"></div>
-                    <div className="absolute inset-2 border-r-2 border-[#5a5a40] rounded-full animate-spin" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }}></div>
-                    <Sparkles className="w-8 h-8 text-[#8b2e16] animate-pulse" />
+              {isLiveMode && (
+                <motion.div initial={{ opacity: 0, scale: 0.98 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.98 }}
+                  className="live-panel">
+                  {/* Live Mode Header */}
+                  <div className="live-header">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                      <div className={isLiveConnected ? 'on-air-indicator' : ''} style={{
+                        width: 10, height: 10, borderRadius: '50%',
+                        background: isLiveConnected ? 'var(--vermillion)' : 'var(--frame-dim)',
+                      }} />
+                      <span style={{ fontFamily: 'var(--font-display)', fontSize: '1.1rem', fontWeight: 400, letterSpacing: '-0.01em', color: 'var(--frame-text)' }}>
+                        {isLiveConnected ? 'ON AIR' : 'Live Session'}
+                      </span>
+                      <span style={{
+                        fontFamily: 'var(--font-mono)', fontSize: '0.55rem', padding: '2px 8px',
+                        background: 'var(--vermillion-dim)', border: '1px solid rgba(194,59,34,0.2)',
+                        borderRadius: 'var(--radius-sm)', color: 'var(--vermillion)', letterSpacing: '0.08em',
+                      }}>
+                        BIDI-STREAMING
+                      </span>
+                      <span style={{
+                        fontFamily: 'var(--font-mono)', fontSize: '0.5rem', padding: '2px 8px',
+                        background: 'var(--brass-dim)', border: '1px solid rgba(196,163,90,0.15)',
+                        borderRadius: 'var(--radius-sm)', color: 'var(--brass)', letterSpacing: '0.06em',
+                      }}>
+                        gemini-live-2.5-flash
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <button onClick={toggleMute}
+                        className="btn-icon" style={{
+                          width: 36, height: 36, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          ...(isMuted ? { background: 'var(--vermillion-dim)', borderColor: 'rgba(194,59,34,0.3)' } : {}),
+                        }}>
+                        {isMuted ? <MicOffIcon className="w-4 h-4" /> : <MicrophoneIcon className="w-4 h-4" />}
+                      </button>
+                      <button onClick={stopLiveMode}
+                        className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.7rem' }}>
+                        <Square className="w-3 h-3" /> End
+                      </button>
+                    </div>
                   </div>
-                  <h3 className="text-2xl font-serif italic text-[#2c2c2c] mb-2">Weaving your story...</h3>
-                  <p className="text-sm text-[#2c2c2c]/60 font-mono">Generating interleaved text and 1K images</p>
+
+                  {/* Audio Waveform Indicator */}
+                  {isLiveConnected && !isMuted && (
+                    <div style={{
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
+                      height: 32, marginBottom: 16,
+                    }}>
+                      {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+                        <motion.div key={i}
+                          animate={{ height: ['3px', `${8 + Math.random() * 16}px`, '3px'] }}
+                          transition={{ repeat: Infinity, duration: 0.6 + Math.random() * 0.4, delay: i * 0.08 }}
+                          style={{
+                            width: 3, borderRadius: 2,
+                            background: 'var(--vermillion)',
+                            opacity: 0.6 + Math.random() * 0.4,
+                          }}
+                        />
+                      ))}
+                      <span style={{
+                        fontFamily: 'var(--font-mono)', fontSize: '0.55rem', color: 'var(--frame-dim)',
+                        marginLeft: 12, letterSpacing: '0.08em',
+                      }}>
+                        LISTENING
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Transcript — light canvas inset */}
+                  <div className="live-transcript-inset">
+                    {liveTranscript.length === 0 && (
+                      <div style={{
+                        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                        height: 200, gap: 16, color: 'var(--canvas-dim)',
+                      }}>
+                        <MicrophoneIcon className="w-8 h-8" />
+                        <p style={{ fontFamily: 'var(--font-display)', fontStyle: 'italic', fontSize: '0.95rem' }}>
+                          Speak to begin your story...
+                        </p>
+                      </div>
+                    )}
+
+                    {liveTranscript.map((entry, i) => (
+                      <div key={i} style={{
+                        marginBottom: 16,
+                        ...(entry.role === 'system' ? { textAlign: 'center' } : {}),
+                        ...(entry.role === 'error' ? { color: '#ef4444' } : {}),
+                      }}>
+                        {entry.role === 'system' ? (
+                          <span style={{
+                            fontFamily: 'var(--font-mono)', fontSize: '0.6rem', color: 'var(--canvas-dim)',
+                            letterSpacing: '0.06em', textTransform: 'uppercase',
+                          }}>
+                            {entry.text}
+                          </span>
+                        ) : entry.role === 'image' && entry.image ? (
+                          <div className="image-frame" style={{ margin: '8px 0' }}>
+                            <img src={entry.image} alt="" style={{ width: '100%', borderRadius: 'var(--radius-md)' }} />
+                          </div>
+                        ) : entry.role === 'error' ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem' }}>
+                            <AlertCircle className="w-3.5 h-3.5" /> {entry.text}
+                          </div>
+                        ) : (
+                          <div>
+                            <span style={{
+                              fontFamily: 'var(--font-mono)', fontSize: '0.55rem',
+                              color: entry.role === 'user' ? 'var(--brass)' : 'var(--vermillion)',
+                              letterSpacing: '0.08em', textTransform: 'uppercase',
+                              marginBottom: 4, display: 'block',
+                            }}>
+                              {entry.role === 'user' ? 'You' : 'OmniWeave'}
+                            </span>
+                            <div style={{
+                              fontSize: '0.9rem', lineHeight: 1.7,
+                              fontFamily: entry.role === 'user' ? 'var(--font-body)' : 'var(--font-display)',
+                              color: 'var(--canvas-body)',
+                            }}>
+                              <ReactMarkdown>{entry.text}</ReactMarkdown>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+
+                    {liveToolStatus && (
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 8,
+                        padding: '8px 12px', background: 'var(--vermillion-dim)',
+                        borderRadius: 'var(--radius-sm)', fontSize: '0.7rem',
+                        fontFamily: 'var(--font-mono)', color: 'var(--vermillion)',
+                      }}>
+                        <Loader2 className="w-3 h-3 animate-spin" /> {liveToolStatus}
+                      </div>
+                    )}
+                    <div ref={liveTranscriptEndRef} />
+                  </div>
+
+                  {/* Text Input Fallback */}
+                  <div style={{
+                    display: 'flex', gap: 8, marginTop: 16,
+                  }}>
+                    <input
+                      type="text"
+                      placeholder="Type a message (or just speak)..."
+                      style={{
+                        flex: 1, background: 'var(--frame-surface)', border: '1px solid var(--frame-ghost)',
+                        borderRadius: 'var(--radius-md)', padding: '10px 16px', color: 'var(--frame-text)',
+                        fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none',
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && e.currentTarget.value.trim()) {
+                          sendLiveText(e.currentTarget.value);
+                          e.currentTarget.value = '';
+                        }
+                      }}
+                    />
+                    <button onClick={(e) => {
+                      const input = (e.currentTarget.previousElementSibling as HTMLInputElement);
+                      if (input.value.trim()) {
+                        sendLiveText(input.value);
+                        input.value = '';
+                      }
+                    }}
+                      className="btn-primary" style={{ padding: '10px 20px', fontSize: '0.8rem' }}>
+                      Send
+                    </button>
+                  </div>
+
+                  {/* Save Live Session */}
+                  {liveTranscript.filter(e => e.role === 'assistant' || e.role === 'image').length > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'center', marginTop: 24 }}>
+                      <button onClick={() => {
+                        // Convert live transcript to story parts
+                        const parts: StoryPart[] = liveTranscript
+                          .filter(e => e.role === 'assistant' || e.role === 'image')
+                          .map((e, i) => {
+                            if (e.role === 'image' && e.image) {
+                              return { type: 'image' as const, url: e.image, id: `live-img-${i}` };
+                            }
+                            return { type: 'text' as const, text: e.text, id: `live-text-${i}` };
+                          });
+                        // Use first user message as title, or fallback
+                        const firstUserMsg = liveTranscript.find(e => e.role === 'user');
+                        const title = firstUserMsg?.text?.substring(0, 80) || 'Live Story Session';
+                        setPrompt(title);
+                        setStoryParts(parts);
+                        stopLiveMode();
+                        showToast('Live session saved — click Save to store in library');
+                      }}
+                        className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.75rem' }}>
+                        <Save className="w-3.5 h-3.5" /> Save as Story
+                      </button>
+                    </div>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
 
-            {/* Agent Activity Log (shows when ADK is connected) */}
+            {/* Loading State */}
+            <AnimatePresence>
+              {isGenerating && storyParts.length === 0 && (
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="story-container" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '70vh' }}>
+                  <div style={{ position: 'relative', width: 64, height: 64, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 40 }}>
+                    <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 3, ease: 'linear' }}
+                      style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: '1px solid rgba(194,59,34,0.2)', borderTopColor: 'var(--vermillion)' }} />
+                    <motion.div animate={{ rotate: -360 }} transition={{ repeat: Infinity, duration: 5, ease: 'linear' }}
+                      style={{ position: 'absolute', inset: 10, borderRadius: '50%', border: '1px solid var(--brass-dim)', borderBottomColor: 'var(--brass)' }} />
+                    <div className="generating-dot" />
+                  </div>
+                  <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.8rem', fontWeight: 300, color: 'var(--frame-text)', marginBottom: 8 }}>Composing your story</h3>
+                  <p style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--frame-dim)', letterSpacing: '0.08em' }}>StoryWriter &rarr; StoryReviewer &rarr; Illustrations</p>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Agent Activity */}
             {adkAvailable && agentActivity.length > 0 && (isGenerating || storyParts.length > 0) && (
-              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} className="mb-6 p-3 rounded-xl bg-[#EEEDFE]/50 border border-[#534AB7]/10">
-                <div className="text-[10px] font-mono text-[#534AB7] font-medium mb-1 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#534AB7] animate-pulse"></span>
-                  ADK Agent Pipeline
+              <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}
+                className="agent-activity" style={{ maxWidth: 720, margin: '0 auto 24px' }}>
+                <div className="activity-line" style={{ marginBottom: 4 }}>
+                  <span className="activity-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span className="on-air-indicator" style={{ width: 5, height: 5 }}></span>
+                    Agent Pipeline
+                  </span>
                 </div>
-                {agentActivity.map((msg, i) => (
-                  <div key={i} className="text-[11px] font-mono text-[#534AB7]/70 pl-3">{msg}</div>
+                {agentActivity.slice(-6).map((msg, i) => (
+                  <div key={i} className="activity-line" style={{ paddingLeft: 12 }}>{msg}</div>
                 ))}
               </motion.div>
             )}
 
+            {/* Story Controls */}
             {storyParts.length > 0 && !isGenerating && (
-              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-12 flex flex-col md:flex-row justify-between items-center gap-4">
-                <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
-                  <button onClick={downloadAsBook} className="px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 bg-black/10 hover:bg-black/20 text-[#2c2c2c] transition-colors whitespace-nowrap text-sm"><BookOpen className="w-4 h-4" /> Download Book</button>
-                  <button onClick={exportAudiobook} className="px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 bg-black/10 hover:bg-black/20 text-[#2c2c2c] transition-colors whitespace-nowrap text-sm"><Download className="w-4 h-4" /> Audiobook</button>
-                  <button onClick={saveToLibrary} disabled={isSaving} className="px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 bg-black/10 hover:bg-black/20 text-[#2c2c2c] transition-colors whitespace-nowrap text-sm disabled:opacity-50">
-                    {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save
+              <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
+                className="story-controls">
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                  <button onClick={downloadAsBook} className="btn-icon" style={{ width: 'auto', padding: '8px 14px', gap: 6, display: 'flex', alignItems: 'center', fontSize: '0.7rem' }}>
+                    <BookOpen className="w-3.5 h-3.5" /> Export
                   </button>
-                </div>
-                <div className="flex items-center gap-2">
+                  <button onClick={exportAudiobook} className="btn-icon" style={{ width: 'auto', padding: '8px 14px', gap: 6, display: 'flex', alignItems: 'center', fontSize: '0.7rem' }}>
+                    <Download className="w-3.5 h-3.5" /> Audiobook
+                  </button>
+                  <button onClick={saveToLibrary} disabled={isSaving} className="btn-icon" style={{ width: 'auto', padding: '8px 14px', gap: 6, display: 'flex', alignItems: 'center', fontSize: '0.7rem' }}>
+                    {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save
+                  </button>
                   <button onClick={() => setMusicEnabled(e => !e)}
-                    className={`px-4 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all whitespace-nowrap text-sm ${
-                      musicEnabled ? 'bg-[#7c3aed]/20 text-[#7c3aed] border border-[#7c3aed]/30' : 'bg-black/10 hover:bg-black/20 text-[#2c2c2c]'
-                    }`}>
-                    <MusicIcon className="w-4 h-4" /> {musicEnabled ? 'Music On' : 'Music'}
-                  </button>
-                  <button id="autoplay-btn" onClick={isAutoPlaying ? stopAutoPlay : startAutoPlay}
-                    className={`px-6 py-2.5 rounded-xl font-medium flex items-center gap-2 transition-all whitespace-nowrap ${
-                      isAutoPlaying
-                        ? 'bg-[#8b2e16]/20 text-[#8b2e16] border border-[#8b2e16]/30 hover:bg-[#8b2e16]/30'
-                        : 'bg-[#8b2e16] text-[#f5f5f0] shadow-[0_0_20px_rgba(139,46,22,0.15)] hover:bg-[#8b2e16]/90'
-                    }`}>
-                    {isAutoPlaying ? (<><Square className="w-4 h-4 fill-current" /> Stop Presentation</>) : (<><Play className="w-4 h-4 fill-current" /> Play Full Story</>)}
+                    className="btn-icon" style={{
+                      width: 'auto', padding: '8px 14px', gap: 6, display: 'flex', alignItems: 'center', fontSize: '0.7rem',
+                      ...(musicEnabled ? { background: 'var(--vermillion-dim)', borderColor: 'rgba(194,59,34,0.2)', color: 'var(--vermillion)' } : {})
+                    }}>
+                    <MusicIcon className="w-3.5 h-3.5" /> {musicEnabled ? 'On' : 'Music'}
                   </button>
                 </div>
+                <button id="autoplay-btn" onClick={isAutoPlaying ? stopAutoPlay : startAutoPlay}
+                  className={isAutoPlaying ? 'btn-secondary' : 'btn-primary'}
+                  style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  {isAutoPlaying ? (<><Square className="w-4 h-4 fill-current" /> Stop</>) : (<><Play className="w-4 h-4 fill-current" /> Play Full Story</>)}
+                </button>
               </motion.div>
             )}
 
-            <div className="space-y-16">
-              {storyParts.map((part, idx) => (
-                <motion.div key={part.id} initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: idx * 0.1, duration: 0.8, ease: [0.16, 1, 0.3, 1] }}>
+            {/* Story Content — canvas inset */}
+            {storyParts.length > 0 && (
+            <div className="story-container">
+              <div className="story-canvas">
+              {storyParts.map((part, idx) => {
+                const imageIndex = part.type === 'image' ? storyParts.slice(0, idx + 1).filter(p => p.type === 'image').length : 0;
+                return (
+                <motion.div key={part.id} initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: Math.min(idx * 0.08, 0.5), duration: 0.8, ease: [0.16, 1, 0.3, 1] }}>
+
+                  {/* Chapter divider */}
+                  {idx > 0 && <div style={{ width: 32, height: 1, background: 'var(--border-canvas)', margin: '48px auto' }} />}
+
                   {part.type === 'image' ? (
-                    <div className="relative group rounded-2xl overflow-hidden shadow-[0_4px_20px_rgba(0,0,0,0.08)] border border-black/5">
+                    <div className="image-frame image-letterbox" style={{ margin: '2em -16px' }}>
                       {part.isLoading ? (
-                        <div className="aspect-video bg-black/5 flex items-center justify-center"><Loader2 className="w-8 h-8 text-[#2c2c2c]/50 animate-spin" /></div>
+                        <div className="image-loading"><span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: 'var(--canvas-dim)', display: 'inline-flex' }}><Loader2 className="w-6 h-6 animate-spin" /></span></div>
                       ) : part.error ? (
-                        <div className="aspect-video bg-[#8b2e16]/10 flex flex-col items-center justify-center text-[#8b2e16] gap-3">
-                          <div className="flex items-center"><AlertCircle className="w-6 h-6 mr-2" />{part.error}</div>
-                          {part.prompt && (<button onClick={() => regenerateImage(part.id, part.prompt!)} className="px-4 py-2 bg-[#8b2e16]/20 hover:bg-[#8b2e16]/30 rounded-lg text-sm transition-colors">Try Again</button>)}
+                        <div className="error-banner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: 32 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}><AlertCircle className="w-4 h-4" />{part.error}</div>
+                          {part.prompt && (<button onClick={() => regenerateImage(part.id, part.prompt!)} className="btn-secondary" style={{ fontSize: '0.7rem' }}>Retry</button>)}
                         </div>
                       ) : !part.url ? (
-                        <div className="aspect-video bg-black/5 flex flex-col items-center justify-center text-[#2c2c2c]/50 p-6 text-center gap-4">
-                          <p className="text-sm italic max-w-md">"{part.prompt}"</p>
-                          <button onClick={() => regenerateImage(part.id, part.prompt!)} className="px-6 py-2.5 bg-[#8b2e16] hover:bg-[#8b2e16]/90 text-[#f5f5f0] rounded-xl text-sm font-medium transition-colors">Generate Image</button>
+                        <div style={{ aspectRatio: '16/9', background: 'var(--canvas-surface)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 }}>
+                          <p style={{ fontFamily: 'var(--font-display)', fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--canvas-dim)', maxWidth: 400, textAlign: 'center' }}>"{part.prompt}"</p>
+                          <button onClick={() => regenerateImage(part.id, part.prompt!)} className="btn-primary" style={{ fontSize: '0.7rem' }}>Generate</button>
                         </div>
                       ) : (
                         <>
-                          <img src={part.url} alt={`Story illustration ${idx}`} className={`w-full h-auto object-cover kenburns-${(idx % 4) + 1}`} referrerPolicy="no-referrer" />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                          <img src={part.url} alt="" className={`kenburns-${(idx % 4) + 1}`} referrerPolicy="no-referrer" />
+                          <div className="frame-number">FRM {String(imageIndex).padStart(3, '0')}</div>
                         </>
                       )}
                     </div>
                   ) : (
-                    <div className="relative pl-8 md:pl-12">
-                      <div className="absolute left-0 top-2 bottom-2 w-px bg-gradient-to-b from-[#8b2e16]/50 to-transparent"></div>
-                      <div className="story-text markdown-body"><ReactMarkdown>{part.text}</ReactMarkdown></div>
-                      <div className="mt-6 flex items-center gap-3 md:gap-4">
+                    <div style={{ padding: '24px 0' }}>
+                      <div className="story-text"><ReactMarkdown>{part.text}</ReactMarkdown></div>
+                      <div style={{ marginTop: 24, display: 'flex', alignItems: 'center', gap: 12 }}>
                         <button id={`play-audio-${part.id}`} onClick={() => playAudio(part.id, part.text)} disabled={part.isLoadingAudio || isGenerating}
-                          className={`flex items-center gap-2 px-3 md:px-4 py-2 rounded-full text-xs md:text-sm font-medium transition-all ${
-                            part.isPlaying ? 'bg-[#8b2e16] text-[#f5f5f0] shadow-[0_0_20px_rgba(139,46,22,0.25)]' : 'bg-black/5 text-[#2c2c2c]/80 hover:bg-black/10 hover:text-[#2c2c2c] border border-black/10'
-                          }`}>
-                          {part.isLoadingAudio ? <Loader2 className="w-4 h-4 animate-spin" /> : part.isPlaying ? <Square className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
-                          <span className="hidden sm:inline">{part.isLoadingAudio ? 'Generating Audio...' : part.isPlaying ? 'Stop Narration' : 'Play Narration'}</span>
-                          <span className="sm:hidden">{part.isLoadingAudio ? '...' : part.isPlaying ? 'Stop' : 'Play'}</span>
+                          className={part.isPlaying ? 'btn-primary' : 'btn-icon'}
+                          style={{ width: 'auto', padding: '8px 16px', gap: 8, display: 'flex', alignItems: 'center', fontSize: '0.7rem', borderRadius: 'var(--radius-md)' }}>
+                          {part.isLoadingAudio ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : part.isPlaying ? <Square className="w-3.5 h-3.5 fill-current" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+                          {part.isLoadingAudio ? 'Generating...' : part.isPlaying ? 'Stop' : 'Listen'}
                         </button>
                         {part.isPlaying && (
-                          <div className="flex items-center gap-1">
-                            {[1, 2, 3, 4].map(i => (<motion.div key={i} animate={{ height: ['8px', '24px', '8px'] }} transition={{ repeat: Infinity, duration: 0.8, delay: i * 0.15 }} className="w-1 bg-[#8b2e16] rounded-full" />))}
+                          <div className="waveform-container">
+                            {[1, 2, 3, 4, 5].map(i => (
+                              <motion.div key={i} animate={{ height: ['4px', '18px', '4px'] }}
+                                transition={{ repeat: Infinity, duration: 0.7, delay: i * 0.1 }}
+                                className="waveform-freq-bar" />
+                            ))}
                           </div>
                         )}
                       </div>
                     </div>
                   )}
                 </motion.div>
-              ))}
-              
+                );
+              })}
+
               {isGenerating && storyParts.length > 0 && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex justify-center py-12">
-                  <div className="flex items-center gap-3 text-[#8b2e16]/80">
-                    <div className="w-5 h-5 border-2 border-[#8b2e16]/30 border-t-[#8b2e16] rounded-full animate-spin"></div>
-                    <span className="font-serif italic text-sm">Weaving more of the story...</span>
+                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}>
+                  <div className="generating-indicator">
+                    <div className="generating-dot" />
+                    <span>Generating...</span>
                   </div>
                 </motion.div>
               )}
+              </div>
             </div>
+            )}
 
+            {/* Embedding Visualization */}
             {embedding && (
               <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
-                className="mt-16 p-6 md:p-8 glass-panel border-black/10 relative overflow-hidden">
-                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#8b2e16] via-[#5a5a40] to-[#8b2e16]"></div>
-                <h3 className="text-sm font-mono text-[#2c2c2c]/80 mb-6 flex items-center gap-2">
-                  <Sparkles className="w-4 h-4 text-[#8b2e16]" />
-                  Multimodal Story Fingerprint {adkAvailable && <span className="text-[10px] text-[#534AB7] bg-[#EEEDFE] px-2 py-0.5 rounded-full">via Cloud Run</span>}
-                </h3>
-                <div className="flex w-full h-16 md:h-24 rounded-xl overflow-hidden bg-black/5 border border-black/5">
-                  {embedding.slice(0, 128).map((val, i) => (
-                    <div key={i} className="flex-1 h-full" style={{ backgroundColor: val > 0 ? '#f97316' : '#3b82f6', opacity: Math.min(1, Math.abs(val) * 20) }} title={`Dim ${i}: ${val.toFixed(4)}`} />
-                  ))}
+                className="embedding-viz">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <span className="embedding-viz-title">Story Fingerprint</span>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', color: 'var(--brass)' }}>{embedding.length}D embedding</span>
                 </div>
-                <div className="mt-4 flex justify-between items-center text-xs text-[#2c2c2c]/60 font-mono">
-                  <span>gemini-embedding-2-preview</span>
-                  <span>{embedding.length} Dimensions</span>
+                <div className="embedding-bars">
+                  {embedding.slice(0, 128).map((val, i) => (
+                    <div key={i} className="embedding-bar" style={{
+                      backgroundColor: val > 0 ? 'var(--vermillion)' : 'var(--brass)',
+                      height: `${Math.min(100, Math.abs(val) * 1500)}%`,
+                      opacity: Math.min(0.8, Math.abs(val) * 15)
+                    }} />
+                  ))}
                 </div>
               </motion.div>
             )}
 
+            {/* Review & Save */}
             {storyParts.length > 0 && !isGenerating && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1 }} className="mt-16 flex flex-col items-center gap-8">
-                <div className="w-full max-w-2xl glass-panel p-6 rounded-2xl border-black/10">
-                  <h3 className="text-xl font-serif text-[#1a1a1a] mb-4 flex items-center gap-2"><Sparkles className="w-5 h-5 text-[#8b2e16]" />Review your Story</h3>
-                  <textarea value={review} onChange={(e) => setReview(e.target.value)} placeholder="What did you think of this story? Add your thoughts before saving..."
-                    className="w-full bg-[#fdfbf7]/80 border border-black/10 rounded-xl p-4 text-[#2c2c2c] placeholder:text-[#2c2c2c]/40 resize-none min-h-[100px] focus:outline-none focus:border-[#8b2e16]/50 transition-colors" maxLength={1000} />
-                  <div className="flex justify-between items-center mt-4">
-                    <span className="text-xs text-[#2c2c2c]/60 font-mono">{review.length}/1000</span>
-                    <button onClick={saveToLibrary} disabled={isSaving} className="px-6 py-2.5 bg-[#8b2e16] hover:bg-[#8b2e16]/90 text-[#f5f5f0] rounded-xl text-sm font-medium transition-colors disabled:opacity-50 flex items-center gap-2">
-                      {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Save Story & Review
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }}
+                style={{ maxWidth: 720, margin: '64px auto 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 32 }}>
+                <div className="review-section" style={{ width: '100%' }}>
+                  <div className="review-header">Your thoughts</div>
+                  <textarea value={review} onChange={(e) => setReview(e.target.value)} placeholder="What did you think of this story?"
+                    style={{
+                      width: '100%', background: 'var(--frame-card)', border: '1px solid var(--frame-ghost)', borderRadius: 'var(--radius-md)',
+                      padding: 16, color: 'var(--frame-text)', resize: 'none', minHeight: 80, fontSize: '0.85rem',
+                      fontFamily: 'var(--font-body)', outline: 'none'
+                    }}
+                    maxLength={1000} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 12 }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', color: 'var(--frame-dim)' }}>{review.length}/1000</span>
+                    <button onClick={saveToLibrary} disabled={isSaving}
+                      className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.75rem' }}>
+                      {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />} Save
                     </button>
                   </div>
                 </div>
 
                 {similarStories.length > 0 && (
-                  <div className="w-full max-w-4xl mt-8">
-                    <h3 className="text-xl font-serif text-[#1a1a1a] mb-6 flex items-center gap-2"><Sparkles className="w-5 h-5 text-[#8b2e16]" />More Like This</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div style={{ width: '100%' }}>
+                    <div className="embedding-viz-title" style={{ marginBottom: 16 }}>Similar Stories</div>
+                    <div className="library-grid" style={{ padding: 0 }}>
                       {similarStories.map((story, idx) => (
-                        <div key={story.id || idx} onClick={() => loadStory(story)} className="glass-panel p-4 rounded-xl border-black/10 cursor-pointer hover:bg-black/5 transition-colors group">
-                          <h4 className="font-medium text-[#1a1a1a] line-clamp-2 mb-2 group-hover:text-[#8b2e16] transition-colors">{story.title}</h4>
-                          <div className="flex justify-between items-center text-xs text-[#2c2c2c]/50">
-                            <span>{new Date(story.createdAt?.toDate?.() || Date.now()).toLocaleDateString()}</span>
-                            <span className="text-[#8b2e16]/80 font-mono">{(story.similarity * 100).toFixed(1)}% Match</span>
-                          </div>
-                        </div>
+                        <motion.div key={story.id || idx} whileHover={{ y: -2 }} onClick={() => loadStory(story)}
+                          className="library-card">
+                          <div className="library-card-title" style={{ marginBottom: 6 }}>{story.title}</div>
+                          <div className="library-card-meta" style={{ fontFamily: 'var(--font-mono)', color: 'var(--brass)', fontSize: '0.6rem' }}>{(story.similarity * 100).toFixed(0)}% match</div>
+                        </motion.div>
                       ))}
                     </div>
                   </div>
                 )}
 
                 <button id="new-story-btn" onClick={() => { setStoryParts([]); setPrompt(''); setReview(''); setAgentActivity([]); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
-                  className="px-8 py-3 bg-transparent border border-black/20 text-[#2c2c2c]/80 hover:text-[#2c2c2c] hover:border-black/40 rounded-full transition-all flex items-center gap-2">
-                  <BookOpen className="w-4 h-4" /> Start a New Story
+                  className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  New Story
                 </button>
               </motion.div>
             )}
@@ -1297,48 +1822,41 @@ GROUNDING: Base your story on internally consistent world-building. Character na
         )}
       </main>
 
-      {/* Footer */}
-      <footer className="border-t border-black/5 bg-[#fdfbf7]/80 backdrop-blur-sm py-8 px-4 md:px-6 mt-16">
-        <div className="max-w-4xl mx-auto">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-xs text-[#2c2c2c]/60">
-            <div>
-              <h4 className="font-semibold text-[#2c2c2c]/80 mb-3 text-sm">Multi-Agent Architecture</h4>
-              <div className="font-mono space-y-1">
-                <div>OmniWeaveDirector <span className="text-[#8b2e16]/60">(LlmAgent)</span></div>
-                <div className="pl-3">StoryPipeline <span className="text-[#5a5a40]/60">(SequentialAgent)</span></div>
-                <div className="pl-6">StoryWriter <span className="text-[#2c2c2c]/40">(LlmAgent)</span></div>
-                <div className="pl-6">StoryReviewer <span className="text-[#2c2c2c]/40">(LlmAgent)</span></div>
-                <div className="pl-3 mt-1">4 FunctionTools</div>
-              </div>
-            </div>
-            <div>
-              <h4 className="font-semibold text-[#2c2c2c]/80 mb-3 text-sm">Gemini Models (7)</h4>
-              <div className="font-mono space-y-1">
-                <div><span className="inline-block w-2 h-2 rounded-full bg-[#8b2e16] mr-1.5" />gemini-3.1-pro-preview</div>
-                <div><span className="inline-block w-2 h-2 rounded-full bg-[#2563eb] mr-1.5" />gemini-3-flash-preview</div>
-                <div><span className="inline-block w-2 h-2 rounded-full bg-[#0891b2] mr-1.5" />gemini-3.1-flash-lite</div>
-                <div><span className="inline-block w-2 h-2 rounded-full bg-[#d97706] mr-1.5" />gemini-3.1-flash-image</div>
-                <div><span className="inline-block w-2 h-2 rounded-full bg-[#059669] mr-1.5" />gemini-2.5-flash-tts</div>
-                <div><span className="inline-block w-2 h-2 rounded-full bg-[#7c3aed] mr-1.5" />gemini-embedding-2</div>
-                <div><span className="inline-block w-2 h-2 rounded-full bg-[#ec4899] mr-1.5" />lyria-realtime-exp</div>
-              </div>
-            </div>
-            <div>
-              <h4 className="font-semibold text-[#2c2c2c]/80 mb-3 text-sm">Google Cloud Services (6)</h4>
-              <div className="font-mono space-y-1">
-                <div>Cloud Run &middot; ADK server</div>
-                <div>Firebase Hosting &middot; Frontend</div>
-                <div>Cloud Firestore &middot; Data</div>
-                <div>Firebase Auth &middot; Anonymous</div>
-                <div>Artifact Registry &middot; Images</div>
-                <div>Cloud Build &middot; CI/CD</div>
-              </div>
+      {/* Footer — minimal, editorial */}
+      <footer>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 40, textAlign: 'left' }}>
+          <div>
+            <div className="embedding-viz-title" style={{ marginBottom: 12 }}>Architecture</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--frame-dim)', lineHeight: 2 }}>
+              <div>OmniWeaveDirector <span style={{ color: 'var(--vermillion)' }}>root</span></div>
+              <div style={{ paddingLeft: 12 }}>StoryPipeline <span style={{ color: 'var(--brass)', opacity: 0.5 }}>sequential</span></div>
+              <div style={{ paddingLeft: 24 }}>StoryWriter</div>
+              <div style={{ paddingLeft: 24 }}>StoryReviewer</div>
+              <div style={{ paddingLeft: 12, opacity: 0.4 }}>4 FunctionTools</div>
             </div>
           </div>
-          <div className="mt-8 pt-4 border-t border-black/5 flex flex-col md:flex-row justify-between items-center gap-2 text-[10px] font-mono text-[#2c2c2c]/40">
-            <span>Built with Google ADK for TypeScript + Google GenAI SDK</span>
-            <span>#GeminiLiveAgentChallenge &middot; Creative Storyteller</span>
+          <div>
+            <div className="embedding-viz-title" style={{ marginBottom: 12 }}>Models</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--frame-dim)', lineHeight: 2 }}>
+              {['gemini-live-2.5-flash', 'gemini-3.1-pro', 'gemini-3-flash', 'gemini-3.1-flash-lite', 'gemini-3.1-flash-image', 'gemini-2.5-pro-tts', 'gemini-embedding-2', 'lyria-realtime'].map(m => (
+                <div key={m} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--vermillion)', opacity: 0.4 }} />{m}
+                </div>
+              ))}
+            </div>
           </div>
+          <div>
+            <div className="embedding-viz-title" style={{ marginBottom: 12 }}>Infrastructure</div>
+            <div style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--frame-dim)', lineHeight: 2 }}>
+              {['Cloud Run', 'Firebase Hosting', 'Cloud Firestore', 'Firebase Auth', 'Artifact Registry', 'Cloud Build'].map(s => (
+                <div key={s}>{s}</div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div style={{ marginTop: 32, paddingTop: 16, borderTop: '1px solid var(--frame-ghost)', display: 'flex', justifyContent: 'space-between', fontSize: '0.6rem', fontFamily: 'var(--font-mono)', color: 'var(--frame-dim)' }}>
+          <span>Google ADK for TypeScript + GenAI SDK</span>
+          <span>Gemini Live Agent Challenge</span>
         </div>
       </footer>
     </div>

@@ -102,3 +102,33 @@ export const MusicIcon = ({ className = "" }: { className?: string }) => (
   </svg>
 );
 
+export const MicrophoneIcon = ({ className = "" }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <rect x="9" y="1" width="6" height="12" rx="3" />
+    <path d="M5 10a7 7 0 0 0 14 0" />
+    <line x1="12" y1="17" x2="12" y2="22" />
+    <line x1="8" y1="22" x2="16" y2="22" />
+    <circle cx="12" cy="7" r="1" fill="currentColor" opacity="0.4" />
+  </svg>
+);
+
+export const MicOffIcon = ({ className = "" }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <rect x="9" y="1" width="6" height="12" rx="3" />
+    <path d="M5 10a7 7 0 0 0 14 0" />
+    <line x1="12" y1="17" x2="12" y2="22" />
+    <line x1="8" y1="22" x2="16" y2="22" />
+    <line x1="2" y1="2" x2="22" y2="22" strokeWidth="2" />
+  </svg>
+);
+
+export const LiveIcon = ({ className = "" }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <circle cx="12" cy="12" r="3" fill="currentColor" />
+    <path d="M16.24 7.76a6 6 0 0 1 0 8.49" />
+    <path d="M7.76 16.24a6 6 0 0 1 0-8.49" />
+    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
+    <path d="M4.93 19.07a10 10 0 0 1 0-14.14" />
+  </svg>
+);
+

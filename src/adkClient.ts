@@ -7,6 +7,18 @@
 
 const ADK_SERVER_URL = (import.meta as any).env?.VITE_ADK_SERVER_URL || '';
 
+export interface ADKStoryEvent {
+  author?: string;
+  text?: string;
+  toolCalls?: { name: string; args: any }[];
+  toolResponses?: { name: string; response: any }[];
+  isFinal?: boolean;
+  done?: boolean;
+  error?: string;
+  renderText?: boolean;
+  replaceText?: boolean;
+}
+
 /** Check if the ADK server is available */
 export async function checkADKServer(): Promise<{ available: boolean; agentInfo?: any }> {
   if (!ADK_SERVER_URL) return { available: false };
@@ -58,26 +70,21 @@ export async function computeEmbeddingViaADK(
 /**
  * Stream a full story generation via the ADK multi-agent pipeline.
  * Uses SSE (Server-Sent Events) for real-time streaming.
- * 
- * The server runs: OmniWeaveDirector → StoryPipeline (StoryWriter → StoryReviewer) → FunctionTools
  */
 export async function generateStoryViaADK(
   prompt: string,
-  onEvent: (event: {
-    author?: string;
-    text?: string;
-    toolCalls?: { name: string; args: any }[];
-    toolResponses?: { name: string; response: any }[];
-    isFinal?: boolean;
-    done?: boolean;
-    error?: string;
-  }) => void
+  onEvent: (event: ADKStoryEvent) => void
 ): Promise<void> {
   const res = await fetch(`${ADK_SERVER_URL}/api/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt }),
   });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(errorText || 'ADK story generation failed');
+  }
 
   if (!res.body) throw new Error('No response body');
 
@@ -109,9 +116,4 @@ export async function generateStoryViaADK(
 /** Get ADK server URL for display */
 export function getADKServerURL(): string {
   return ADK_SERVER_URL;
-}
-
-/** Check if ADK mode is enabled */
-export function isADKEnabled(): boolean {
-  return !!ADK_SERVER_URL;
 }

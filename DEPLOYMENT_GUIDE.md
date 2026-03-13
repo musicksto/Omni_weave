@@ -43,7 +43,7 @@ chmod +x deploy.sh
 - Enables Cloud Run, Artifact Registry, Cloud Build APIs
 - Builds Docker container from the ADK server
 - Pushes to Artifact Registry
-- Deploys to Cloud Run with your API key
+- Deploys to Cloud Run with your API key mapped to the ADK-compatible runtime env vars
 - Returns the service URL
 
 ### 2. Deploy Frontend to Firebase Hosting
@@ -51,6 +51,12 @@ chmod +x deploy.sh
 ```bash
 # From the project root
 cd ..
+
+# Configure frontend env
+cp .env.example .env.local
+# Set:
+#   VITE_ADK_SERVER_URL=https://<your-cloud-run-url>
+#   VITE_GEMINI_API_KEY=...   # optional, needed for browser-side narration/music
 
 # Build the frontend
 npm run build
@@ -107,6 +113,7 @@ Key infrastructure files:
 - `server/Dockerfile` — Container definition
 - `server/agent.ts` — ADK agent using `@google/adk`
 - `server/server.ts` — Express server with Gemini API calls
+- `src/adkClient.ts` — Frontend Cloud Run integration (`/api/generate`, `/api/generate-image`, `/api/embed`)
 
 ---
 
@@ -120,6 +127,11 @@ curl https://omniweave-adk-<hash>.a.run.app/
 
 # Agent architecture info
 curl https://omniweave-adk-<hash>.a.run.app/api/agent-info
+
+# Story generation stream
+curl -N -X POST https://omniweave-adk-<hash>.a.run.app/api/generate \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "A magical library hidden beneath a city of glass"}'
 
 # Test image generation
 curl -X POST https://omniweave-adk-<hash>.a.run.app/api/generate-image \
@@ -139,7 +151,7 @@ open https://gen-lang-client-0001923421.web.app
 
 ## Google Cloud Services Checklist
 
-- [x] **Gemini Models** (7 models via Google GenAI SDK + ADK)
+- [x] **Gemini Models** (8 models via Google GenAI SDK + ADK)
 - [x] **Google GenAI SDK** (`@google/genai` in frontend)
 - [x] **Google ADK** (`@google/adk` in server)
 - [x] **Cloud Run** (ADK agent server)
@@ -171,5 +183,11 @@ firebase hosting:channel:deploy preview --expires 7d
 ```bash
 gcloud run services update omniweave-adk \
   --region=us-central1 \
-  --set-env-vars "GOOGLE_API_KEY=your-new-key"
+  --set-env-vars "GOOGLE_API_KEY=your-new-key,GEMINI_API_KEY=your-new-key,GOOGLE_GENAI_API_KEY=your-new-key"
+```
+
+**Narration/music not working in the browser:**
+```bash
+# These browser-side features require a client-exposed Vite env var.
+echo 'VITE_GEMINI_API_KEY=your-key' >> .env.local
 ```

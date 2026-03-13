@@ -94,12 +94,10 @@ service cloud.firestore {
 
     function isValidStory() {
       let data = request.resource.data;
-      return hasOnlyAllowedFields(['authorId', 'title', 'parts', 'createdAt', 'review', 'embedding']) &&
-             data.authorId is string && data.authorId.size() > 0 && data.authorId.size() < 128 &&
-             data.title is string && data.title.size() > 0 && data.title.size() < 500 &&
-             (!('review' in data) || (data.review is string && data.review.size() <= 1000)) &&
-             (!('embedding' in data) || (data.embedding is list && data.embedding.size() <= 2048)) &&
-             data.parts is string && data.parts.size() > 0 && data.parts.size() < 1000000 && // Max 1MB
+      return data.keys().hasAll(['authorId', 'title', 'parts', 'createdAt']) &&
+             data.authorId is string && data.authorId.size() > 0 &&
+             data.title is string && data.title.size() > 0 &&
+             data.parts is string && data.parts.size() > 0 &&
              data.createdAt is timestamp;
     }
 
@@ -132,8 +130,10 @@ service cloud.firestore {
     // Rules
     // ===============================================================
     match /audio_cache/{hashId} {
-      allow read: if isAuthenticated();
-      allow create: if isAuthenticated() && isValidAudioCache();
+      // Shared hash-based cache cannot be isolated per user with the current schema.
+      // Disable it rather than over-claim privacy.
+      allow read: if false;
+      allow create: if false;
       allow update: if false; // immutable cache
       allow delete: if isAdmin();
     }
@@ -146,20 +146,20 @@ service cloud.firestore {
     }
 
     match /stories/{storyId} {
-      allow read: if isAuthenticated();
+      allow read: if isDocOwner() || isAdmin();
       allow create: if isAuthenticated() && isValidStory() && authorIdUnchanged();
       allow update: if isAuthenticated() && isValidStory() && isDocOwner() && authorIdNotModified() && areImmutableFieldsUnchanged(['createdAt']);
       allow delete: if isDocOwner() || isAdmin();
       
       match /images/{imageId} {
-        allow read: if isAuthenticated();
+        allow read: if isDocOwner() || isAdmin();
         allow create: if isAuthenticated() && isValidStoryImage() && get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid;
         allow update: if isAuthenticated() && isValidStoryImage() && get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid && areImmutableFieldsUnchanged(['createdAt']);
         allow delete: if isAuthenticated() && (get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid || isAdmin());
       }
 
       match /audio/{audioId} {
-        allow read: if isAuthenticated();
+        allow read: if isDocOwner() || isAdmin();
         allow create: if isAuthenticated() && isValidStoryAudio() && get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid;
         allow update: if isAuthenticated() && isValidStoryAudio() && get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid && areImmutableFieldsUnchanged(['createdAt']);
         allow delete: if isAuthenticated() && (get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid || isAdmin());

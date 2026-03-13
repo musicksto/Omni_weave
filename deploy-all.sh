@@ -1,13 +1,16 @@
 #!/bin/bash
 # OmniWeave — Full stack deployment (Cloud Run + Firebase Hosting)
 # Requires: Node.js 20+, gcloud CLI, firebase CLI
-# Usage: GCP_PROJECT_ID=... GOOGLE_API_KEY=... ./deploy-all.sh
+# Usage: GCP_PROJECT_ID=... ./deploy-all.sh
+# Cloud Run uses Vertex AI auth (ADC) — no API key required on the server.
+# Set GOOGLE_API_KEY only if you need API-key mode instead.
 
 set -euo pipefail
 
 PROJECT_ID="${GCP_PROJECT_ID:?Error: GCP_PROJECT_ID is not set}"
 REGION="${GCP_REGION:-us-central1}"
-API_KEY="${GOOGLE_API_KEY:?Error: GOOGLE_API_KEY is not set}"
+API_KEY="${GOOGLE_API_KEY:-}"
+BROWSER_API_KEY="${VITE_GEMINI_API_KEY:-}"
 SERVICE_NAME="omniweave-adk"
 REPO_NAME="omniweave"
 
@@ -61,6 +64,15 @@ gcloud builds submit --tag "${IMAGE_URI}" .
 
 # Deploy
 echo "→ Deploying to Cloud Run..."
+ENV_VARS="GOOGLE_GENAI_USE_VERTEXAI=TRUE"
+ENV_VARS="${ENV_VARS},GOOGLE_CLOUD_PROJECT=${PROJECT_ID}"
+ENV_VARS="${ENV_VARS},GOOGLE_CLOUD_LOCATION=global"
+if [ -n "${API_KEY}" ]; then
+  ENV_VARS="${ENV_VARS},GOOGLE_API_KEY=${API_KEY}"
+  ENV_VARS="${ENV_VARS},GEMINI_API_KEY=${API_KEY}"
+  ENV_VARS="${ENV_VARS},GOOGLE_GENAI_API_KEY=${API_KEY}"
+fi
+
 gcloud run deploy "${SERVICE_NAME}" \
   --image "${IMAGE_URI}" \
   --region "${REGION}" \
@@ -71,8 +83,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --cpu 1 \
   --min-instances 0 \
   --max-instances 10 \
-  --set-env-vars "GOOGLE_API_KEY=${API_KEY}" \
-  --set-env-vars "GOOGLE_GENAI_USE_VERTEXAI=FALSE" \
+  --set-env-vars "${ENV_VARS}" \
   --quiet
 
 BACKEND_URL=$(gcloud run services describe "${SERVICE_NAME}" \
@@ -90,9 +101,14 @@ echo "━━━ Phase 2: Deploying Frontend to Firebase Hosting ━━━"
 
 # Build the frontend with the backend URL
 echo "→ Building frontend..."
-VITE_ADK_SERVER_URL="${BACKEND_URL}" npm run build
+VITE_ADK_SERVER_URL="${BACKEND_URL}" \
+VITE_GEMINI_API_KEY="${BROWSER_API_KEY}" \
+npm run build
 
-# Deploy to Firebase Hosting
+# Deploy Firestore rules and Hosting
+echo "→ Deploying Firestore rules..."
+firebase deploy --only firestore:rules --project "${PROJECT_ID}"
+
 echo "→ Deploying to Firebase Hosting..."
 firebase deploy --only hosting --project "${PROJECT_ID}"
 
