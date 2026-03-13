@@ -189,7 +189,8 @@ app.post('/api/generate', async (req, res) => {
 const getServerAI = () => {
   const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY;
   if (apiKey) {
-    return new GoogleGenAI({ apiKey });
+    // Explicitly disable Vertex AI — env var GOOGLE_GENAI_USE_VERTEXAI overrides constructor otherwise
+    return new GoogleGenAI({ apiKey, vertexai: false } as any);
   }
   // Fallback to Vertex AI if no API key
   const project = process.env.GOOGLE_CLOUD_PROJECT;

@@ -46,7 +46,7 @@ export async function createLiveSession(clientWs: WebSocket): Promise<void> {
     if (!apiKey) {
       throw new Error('Live API requires GOOGLE_API_KEY (API key mode, not Vertex AI)');
     }
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ apiKey, vertexai: false } as any);
 
     const session = await ai.live.connect({
       model: LIVE_MODEL,
