@@ -1865,7 +1865,7 @@ GROUNDING: Base your story on internally consistent world-building. Character na
             {/* Review & Save */}
             {storyParts.length > 0 && !isGenerating && (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.8 }}
-                style={{ maxWidth: 720, margin: '64px auto 0', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 32 }}>
+                style={{ maxWidth: 780, margin: '24px auto 0', padding: '0 clamp(16px, 3vw, 40px)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 16 }}>
                 <div className="review-section" style={{ width: '100%' }}>
                   <div className="review-header">Your thoughts</div>
                   <textarea value={review} onChange={(e) => setReview(e.target.value)} placeholder="What did you think of this story?"

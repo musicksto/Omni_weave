@@ -1,85 +1,38 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // ===============================================================
-    // OmniWeave Firestore Security Rules
-    // Per-user data isolation with anonymous auth support
-    // ===============================================================
 
     function isAuthenticated() {
       return request.auth != null;
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
-
-    function isDocOwner() {
-      return isAuthenticated() && resource.data.authorId == request.auth.uid;
-    }
-
-    function isNewDocOwner() {
-      return isAuthenticated() && request.resource.data.authorId == request.auth.uid;
-    }
-
-    // ===============================================================
-    // Stories — per-user isolated, anonymous auth supported
-    // ===============================================================
+    // Stories — per-user isolated
     match /stories/{storyId} {
-      // Users can only read their own stories
-      allow read: if isDocOwner();
+      allow read: if isAuthenticated()
+                  && resource.data.authorId == request.auth.uid;
 
-      // Users can create stories if authenticated and authorId matches their uid
-      // Required fields: authorId, title, parts, createdAt
-      // Optional fields: review, embedding
       allow create: if isAuthenticated()
-                    && isNewDocOwner()
-                    && request.resource.data.keys().hasAll(['authorId', 'title', 'parts', 'createdAt'])
-                    && request.resource.data.authorId is string
-                    && request.resource.data.title is string
-                    && request.resource.data.parts is string;
+                    && request.resource.data.authorId == request.auth.uid;
 
-      // Users can update their own stories (authorId immutable)
-      allow update: if isDocOwner()
+      allow update: if isAuthenticated()
+                    && resource.data.authorId == request.auth.uid
                     && request.resource.data.authorId == resource.data.authorId;
 
-      // Users can delete their own stories
-      allow delete: if isDocOwner();
+      allow delete: if isAuthenticated()
+                    && resource.data.authorId == request.auth.uid;
 
-      // Story images subcollection — per-user isolated
-      match /images/{imageId} {
-        allow read: if isAuthenticated()
-                    && get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid;
-        allow create: if isAuthenticated()
-                      && get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid;
-        allow delete: if isAuthenticated()
-                      && get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid;
-      }
-
-      // Story audio subcollection — per-user isolated
-      match /audio/{audioId} {
-        allow read: if isAuthenticated()
-                    && get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid;
-        allow create: if isAuthenticated()
-                      && get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid;
-        allow delete: if isAuthenticated()
-                      && get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid;
+      match /{sub=**} {
+        allow read, write: if isAuthenticated()
+                           && get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid;
       }
     }
 
-    // ===============================================================
-    // Users — profile data, per-user isolated
-    // ===============================================================
+    // Users — per-user isolated
     match /users/{userId} {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId);
-      allow update: if isOwner(userId);
-      allow delete: if false; // No self-deletion
+      allow read, write: if isAuthenticated() && request.auth.uid == userId;
     }
 
-    // ===============================================================
-    // Deny all other collections
-    // ===============================================================
+    // Deny everything else
     match /{document=**} {
       allow read, write: if false;
     }

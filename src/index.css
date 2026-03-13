@@ -647,7 +647,6 @@ body::after {
     var(--shadow-inset),
     4px 0 0 -1px rgba(210, 200, 185, 0.3),
     8px 0 0 -2px rgba(210, 200, 185, 0.15);
-  min-height: 60vh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -656,12 +655,11 @@ body::after {
 
 .story-page {
   flex: 1;
-  padding: clamp(28px, 5vw, 56px) clamp(28px, 5vw, 56px) 48px;
+  padding: clamp(24px, 4vw, 48px) clamp(24px, 4vw, 48px) 40px;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   overflow-y: auto;
-  max-height: 75vh;
+  max-height: calc(100vh - 220px);
 }
 
 /* Page number at bottom */
@@ -753,9 +751,9 @@ body::after {
 
 .story-text {
   font-family: var(--font-display);
-  font-size: 1.35rem;
+  font-size: 1.1rem;
   font-weight: 400;
-  line-height: 2;
+  line-height: 1.85;
   color: var(--canvas-text);
   letter-spacing: 0.01em;
 }
@@ -995,9 +993,9 @@ body::after {
    EMBEDDING VISUALIZATION — DNA bar chart
    =========================================================================== */
 .embedding-viz {
-  max-width: 720px;
-  margin: var(--gap-lg) auto;
-  padding: 20px;
+  max-width: 780px;
+  margin: var(--gap-md) auto;
+  padding: 12px 16px;
   background: var(--frame-surface);
   border: 1px solid var(--frame-ghost);
   border-radius: var(--radius-md);
@@ -1016,7 +1014,7 @@ body::after {
   display: flex;
   align-items: flex-end;
   gap: 1px;
-  height: 48px;
+  height: 32px;
 }
 
 .embedding-bar {
@@ -1030,9 +1028,9 @@ body::after {
    REVIEW SECTION — on dark frame
    =========================================================================== */
 .review-section {
-  max-width: 720px;
-  margin: var(--gap-lg) auto;
-  padding: 20px;
+  max-width: 780px;
+  margin: var(--gap-md) auto;
+  padding: 12px 16px;
   background: var(--frame-surface);
   border: 1px solid var(--frame-ghost);
   border-left: 2px solid var(--brass);
@@ -1058,8 +1056,9 @@ body::after {
    STORY CONTROLS — dark playback bar
    =========================================================================== */
 .story-controls {
-  max-width: 720px;
-  margin: var(--gap-lg) auto;
+  max-width: 780px;
+  margin: 0 auto var(--gap-md);
+  padding: 0 clamp(16px, 3vw, 40px);
   display: flex;
   align-items: center;
   gap: var(--gap-sm);
@@ -1406,8 +1405,8 @@ footer a:hover {
   }
 
   .story-page {
-    padding: 24px 20px 48px;
-    max-height: 70vh;
+    padding: 20px 16px 40px;
+    max-height: calc(100vh - 200px);
   }
 
   .page-nav-prev {
