@@ -787,6 +787,30 @@ body::after {
 .story-text h3 { font-size: 1.2rem; }
 .story-text p { margin-bottom: 1.2em; }
 
+/* Cinematic Drop Caps for story text */
+.story-page > div:first-of-type .story-text p:first-of-type::first-letter {
+  font-family: var(--font-display);
+  font-size: 4.2rem;
+  font-weight: 300;
+  float: left;
+  line-height: 0.85;
+  padding-right: 0.15em;
+  padding-top: 0.05em;
+  color: var(--vermillion);
+}
+
+.story-media-bleed {
+  margin: calc(-1 * clamp(24px, 4vw, 48px)) calc(-1 * clamp(24px, 4vw, 48px)) 2em;
+  border-radius: 0 !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+}
+
+.story-media-bleed-bottom {
+  margin: 2em calc(-1 * clamp(24px, 4vw, 48px)) calc(-1 * clamp(24px, 4vw, 48px));
+  border-radius: 0 !important;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
+}
+
 .story-text blockquote {
   border-left: 2px solid var(--vermillion);
   padding-left: 20px;

@@ -1783,40 +1783,40 @@ GROUNDING: Base your story on internally consistent world-building. Character na
                     return (
                       <div key={part.id}>
                         {part.type === 'video' ? (
-                          <div className="image-frame image-letterbox" style={{ margin: pidx === 0 ? '0 -16px 1.5em' : '1.5em -16px 0' }}>
+                          <div className={`image-frame image-letterbox ${pidx === 0 ? 'story-media-bleed' : 'story-media-bleed-bottom'}`}>
                             {part.error ? (
                               <div className="error-banner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: 32 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}><AlertCircle className="w-4 h-4" />{part.error}</div>
                               </div>
                             ) : !part.url ? (
-                              <div style={{ aspectRatio: '16/9', background: 'var(--canvas-surface)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 }}>
+                              <div style={{ aspectRatio: '16/9', background: 'var(--frame-surface)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 }}>
                                 <span style={{ color: 'var(--canvas-dim)', display: 'inline-flex' }}><Loader2 className="w-6 h-6 animate-spin" /></span>
                                 <p style={{ fontFamily: 'var(--font-display)', fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--canvas-dim)', maxWidth: 400, textAlign: 'center' }}>Generating Video: "{part.prompt}"</p>
                               </div>
                             ) : (
                               <>
-                                <video src={part.url} autoPlay loop muted playsInline className={`kenburns-${(globalIdx % 4) + 1}`} style={{ width: '100%', objectFit: 'cover', borderRadius: 'var(--radius-md)' }} />
+                                <video src={part.url} autoPlay loop muted playsInline className={`kenburns-${(globalIdx % 4) + 1}`} style={{ width: '100%', objectFit: 'cover', borderRadius: 0 }} />
                                 <div className="frame-number">VID {String(globalIdx).padStart(3, '0')}</div>
                               </>
                             )}
                           </div>
                         ) : part.type === 'image' ? (
-                          <div className="image-frame image-letterbox" style={{ margin: pidx === 0 ? '0 -16px 1.5em' : '1.5em -16px 0' }}>
+                          <div className={`image-frame image-letterbox ${pidx === 0 ? 'story-media-bleed' : 'story-media-bleed-bottom'}`}>
                             {part.isLoading ? (
-                              <div className="image-loading"><span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: 'var(--canvas-dim)', display: 'inline-flex' }}><Loader2 className="w-6 h-6 animate-spin" /></span></div>
+                              <div className="image-loading" style={{ background: 'var(--frame-surface)' }}><span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: 'var(--canvas-dim)', display: 'inline-flex' }}><Loader2 className="w-6 h-6 animate-spin" /></span></div>
                             ) : part.error ? (
                               <div className="error-banner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: 32 }}>
                                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}><AlertCircle className="w-4 h-4" />{part.error}</div>
                                 {part.prompt && (<button onClick={() => regenerateImage(part.id, part.prompt!)} className="btn-secondary" style={{ fontSize: '0.7rem' }}>Retry</button>)}
                               </div>
                             ) : !part.url ? (
-                              <div style={{ aspectRatio: '16/9', background: 'var(--canvas-surface)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 }}>
+                              <div style={{ aspectRatio: '16/9', background: 'var(--frame-surface)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 }}>
                                 <p style={{ fontFamily: 'var(--font-display)', fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--canvas-dim)', maxWidth: 400, textAlign: 'center' }}>"{part.prompt}"</p>
                                 <button onClick={() => regenerateImage(part.id, part.prompt!)} className="btn-primary" style={{ fontSize: '0.7rem' }}>Generate</button>
                               </div>
                             ) : (
                               <>
-                                <img src={part.url} alt="" className={`kenburns-${(globalIdx % 4) + 1}`} referrerPolicy="no-referrer" />
+                                <img src={part.url} alt="" className={`kenburns-${(globalIdx % 4) + 1}`} style={{ borderRadius: 0 }} referrerPolicy="no-referrer" />
                                 <div className="frame-number">FRM {String(imageIndex).padStart(3, '0')}</div>
                               </>
                             )}

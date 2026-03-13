@@ -86,9 +86,7 @@ gcloud run deploy "${SERVICE_NAME}" \
   --set-env-vars "${ENV_VARS}" \
   --quiet
 
-BACKEND_URL=$(gcloud run services describe "${SERVICE_NAME}" \
-  --region="${REGION}" \
-  --format='value(status.url)')
+BACKEND_URL="https://omniweave-adk-dvrl3ikvnq-uc.a.run.app"
 
 echo "✅ Backend deployed: ${BACKEND_URL}"
 cd ..
