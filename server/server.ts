@@ -184,17 +184,18 @@ app.post('/api/generate', async (req, res) => {
   }
 });
 
+// REST endpoints (image, embed, TTS) use API key mode for reliability.
+// Only the ADK runner uses Vertex AI mode (via env vars automatically).
 const getServerAI = () => {
-  const vertexMode = (process.env.GOOGLE_GENAI_USE_VERTEXAI || '').toUpperCase() === 'TRUE';
-  if (vertexMode) {
-    const project = process.env.GOOGLE_CLOUD_PROJECT;
-    const location = process.env.GOOGLE_CLOUD_LOCATION || 'global';
-    if (!project) throw new Error('GOOGLE_CLOUD_PROJECT must be set in Vertex AI mode');
-    return new GoogleGenAI({ vertexai: true, project, location });
-  }
   const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY;
-  if (!apiKey) throw new Error('Server API key not configured');
-  return new GoogleGenAI({ apiKey });
+  if (apiKey) {
+    return new GoogleGenAI({ apiKey });
+  }
+  // Fallback to Vertex AI if no API key
+  const project = process.env.GOOGLE_CLOUD_PROJECT;
+  const location = process.env.GOOGLE_CLOUD_LOCATION || 'global';
+  if (!project) throw new Error('No API key or GOOGLE_CLOUD_PROJECT configured');
+  return new GoogleGenAI({ vertexai: true, project, location });
 };
 
 app.post('/api/generate-image', async (req, res) => {

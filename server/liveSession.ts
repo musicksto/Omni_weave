@@ -6,8 +6,8 @@
  */
 
 import type { WebSocket } from 'ws';
-import { Modality, type FunctionCall } from '@google/genai';
-import { getAI, LIVE_MODEL, liveToolExecutors, liveToolDeclarations } from './agent.js';
+import { GoogleGenAI, Modality, type FunctionCall } from '@google/genai';
+import { LIVE_MODEL, liveToolExecutors, liveToolDeclarations } from './agent.js';
 
 /** Message types sent FROM the browser client */
 interface ClientMessage {
@@ -41,7 +41,12 @@ export async function createLiveSession(clientWs: WebSocket): Promise<void> {
   const conversationHistory: Array<{ role: string; content: string; image?: string }> = [];
 
   try {
-    const ai = getAI();
+    // Live API requires API key mode (not Vertex AI)
+    const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_GENAI_API_KEY;
+    if (!apiKey) {
+      throw new Error('Live API requires GOOGLE_API_KEY (API key mode, not Vertex AI)');
+    }
+    const ai = new GoogleGenAI({ apiKey });
 
     const session = await ai.live.connect({
       model: LIVE_MODEL,
