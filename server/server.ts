@@ -283,9 +283,14 @@ app.post('/api/tts', async (req, res) => {
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
 
+    // If multi-speaker, add performance direction for distinct voices
+    const ttsContent = speakerVoiceConfigs.length > 1
+      ? `Perform this as a voice actor. Each character must sound COMPLETELY DIFFERENT — vary pitch, pacing, accent, and energy dramatically between speakers:\n\n${script}`
+      : script;
+
     const stream = await ai.models.generateContentStream({
       model: TTS_MODEL,
-      contents: [{ role: 'user', parts: [{ text: script }] }],
+      contents: [{ role: 'user', parts: [{ text: ttsContent }] }],
       config: { responseModalities: ['AUDIO'], speechConfig },
     });
 

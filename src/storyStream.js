@@ -38,22 +38,38 @@ const appendImagePart = (state, newParts, prompt) => {
   newParts.push(part);
 };
 
+const stripCharacterSheet = (text) => {
+  // Remove the ---CHARACTER SHEET--- ... ---END CHARACTER SHEET--- block (internal metadata, not for display)
+  const pattern = /---CHARACTER SHEET---[\s\S]*?---END CHARACTER SHEET---\s*/gi;
+  return text.replace(pattern, '');
+};
+
+const stripReviewHeader = (text) => {
+  // Remove the [REVIEW: PASS] or [REVIEW: FIXED (N issues)] header line
+  const pattern = /^\s*\[REVIEW:\s*(?:PASS|FIXED\s*\([^)]*\))\]\s*\n?/i;
+  return text.replace(pattern, '');
+};
+
 const processText = (state, sourceText, newParts) => {
+  // Strip internal metadata before rendering
+  let cleanText = stripCharacterSheet(sourceText);
+  cleanText = stripReviewHeader(cleanText);
+
   const imagePattern = /\[IMAGE:\s*(.*?)\s*\]/g;
   let lastIndex = 0;
   let match;
 
-  while ((match = imagePattern.exec(sourceText)) !== null) {
+  while ((match = imagePattern.exec(cleanText)) !== null) {
     if (match.index > lastIndex) {
-      appendTextPart(state, newParts, sourceText.slice(lastIndex, match.index));
+      appendTextPart(state, newParts, cleanText.slice(lastIndex, match.index));
     }
 
     appendImagePart(state, newParts, match[1]);
     lastIndex = imagePattern.lastIndex;
   }
 
-  if (lastIndex < sourceText.length) {
-    appendTextPart(state, newParts, sourceText.slice(lastIndex));
+  if (lastIndex < cleanText.length) {
+    appendTextPart(state, newParts, cleanText.slice(lastIndex));
   }
 };
 

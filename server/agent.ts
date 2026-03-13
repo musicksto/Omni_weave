@@ -303,6 +303,8 @@ CHARACTER: [Name]
 ---END CHARACTER SHEET---
 
 3. Format all story text as a script with speaker labels: "Narrator:", "CharacterName:", etc.
+   - Give each character a DISTINCT speaking style: different vocabulary, sentence length, verbal tics, or accent hints (e.g., formal vs casual, short punchy vs flowery, with catchphrases or stutters).
+   - The Narrator should have a cinematic, dramatic tone. Other characters should contrast strongly with each other.
 4. Place exactly 3–4 image markers using: [IMAGE: <prompt>]
 5. EVERY [IMAGE:] prompt MUST:
    - Restate the art style word-for-word from the CHARACTER SHEET

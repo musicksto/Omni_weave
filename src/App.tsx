@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { GoogleGenAI, Modality } from '@google/genai';
 import ReactMarkdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
-import { PlayIcon as Play, StopIcon as Square, SpinnerIcon as Loader2, QuillIcon as Sparkles, ArrowRightIcon as ArrowRight, CheckIcon as CheckCircle2, AlertIcon as AlertCircle, BookIcon as BookOpen, DownloadIcon as Download, BookmarkIcon as Save, LibraryIcon as Library, MusicIcon, MicrophoneIcon, MicOffIcon, LiveIcon } from './components/Icons';
+import { PlayIcon as Play, StopIcon as Square, SpinnerIcon as Loader2, QuillIcon as Sparkles, ArrowRightIcon as ArrowRight, CheckIcon as CheckCircle2, AlertIcon as AlertCircle, BookIcon as BookOpen, DownloadIcon as Download, BookmarkIcon as Save, LibraryIcon as Library, MusicIcon, MicrophoneIcon, MicOffIcon, LiveIcon, ChevronLeftIcon, ChevronRightIcon } from './components/Icons';
 import { createLiveClient, type LiveCallbacks } from './liveClient';
 import { auth, db } from './firebase';
 import { signInAnonymously, onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
@@ -230,11 +230,13 @@ function assignVoice(name: string, existing: Record<string, string>): string {
   if (name === 'Narrator') return 'Zephyr';
   const gender = guessGender(name);
   const used = new Set(Object.values(existing));
-  const FEMALE_VOICES = ['Kore', 'Aoede', 'Leda'];
-  const MALE_VOICES = ['Fenrir', 'Charon', 'Enceladus'];
-  if (gender === 'female') return FEMALE_VOICES.find(v => !used.has(v)) || FEMALE_VOICES[0];
-  if (gender === 'male') return MALE_VOICES.find(v => !used.has(v)) || MALE_VOICES[0];
-  return 'Puck';
+  // Expanded voice pools — each voice has a distinct accent/tone so characters sound obviously different
+  const FEMALE_VOICES = ['Kore', 'Aoede', 'Leda', 'Puck', 'Zephyr'];
+  const MALE_VOICES = ['Fenrir', 'Charon', 'Enceladus', 'Puck', 'Kore'];
+  const NEUTRAL_VOICES = ['Puck', 'Kore', 'Fenrir', 'Aoede', 'Charon'];
+  if (gender === 'female') return FEMALE_VOICES.find(v => !used.has(v)) || FEMALE_VOICES[Math.floor(Math.random() * 3)];
+  if (gender === 'male') return MALE_VOICES.find(v => !used.has(v)) || MALE_VOICES[Math.floor(Math.random() * 3)];
+  return NEUTRAL_VOICES.find(v => !used.has(v)) || 'Puck';
 }
 
 // Mood extraction for background music
@@ -298,10 +300,62 @@ export default function App() {
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [musicEnabled, setMusicEnabled] = useState(false);
   const [musicSession, setMusicSession] = useState<any>(null);
+  const [currentPage, setCurrentPage] = useState(0);
 
   // Ref to avoid stale closures in audio callbacks
   const storyPartsRef = useRef<StoryPart[]>([]);
   useEffect(() => { storyPartsRef.current = storyParts; }, [storyParts]);
+
+  // Group story parts into "pages" — each page = one text block + its following image (if any)
+  const storyPages = (() => {
+    const pages: StoryPart[][] = [];
+    let i = 0;
+    while (i < storyParts.length) {
+      const part = storyParts[i];
+      if (part.type === 'text') {
+        // Check if next part is an image — pair them on one page
+        if (i + 1 < storyParts.length && storyParts[i + 1].type === 'image') {
+          pages.push([part, storyParts[i + 1]]);
+          i += 2;
+        } else {
+          pages.push([part]);
+          i += 1;
+        }
+      } else {
+        // Standalone image page
+        pages.push([part]);
+        i += 1;
+      }
+    }
+    return pages;
+  })();
+
+  const totalPages = storyPages.length;
+  const safeCurrentPage = Math.min(currentPage, Math.max(0, totalPages - 1));
+
+  // Auto-advance to latest page while generating
+  useEffect(() => {
+    if (isGenerating && totalPages > 0) {
+      setCurrentPage(totalPages - 1);
+    }
+  }, [totalPages, isGenerating]);
+
+  // Keyboard navigation for pages
+  useEffect(() => {
+    if (totalPages === 0) return;
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) return;
+      if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCurrentPage(p => Math.min(p + 1, totalPages - 1));
+      } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        setCurrentPage(p => Math.max(p - 1, 0));
+      }
+    };
+    window.addEventListener('keydown', handleKey);
+    return () => window.removeEventListener('keydown', handleKey);
+  }, [totalPages]);
 
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToast({ message, type });
@@ -585,6 +639,7 @@ export default function App() {
     try {
       const parsedParts = JSON.parse(story.parts);
       setStoryParts(parsedParts);
+      setCurrentPage(0);
       setShowLibrary(false);
     } catch (e) {
       console.error("Failed to load story parts", e);
@@ -728,6 +783,7 @@ export default function App() {
     setIsGenerating(true);
     setError('');
     setStoryParts([]);
+    setCurrentPage(0);
     setEmbedding(null);
     setIsAutoPlaying(false);
     setCurrentPlayIndex(-1);
@@ -784,6 +840,7 @@ export default function App() {
             streamState.buffer = '';
             streamState.nextPartIndex = 0;
             setStoryParts([]);
+            setCurrentPage(0);
           }
 
           if (event.author && !seenAuthors.has(event.author)) {
@@ -1028,7 +1085,7 @@ GROUNDING: Base your story on internally consistent world-building. Character na
               ? chunk.text.replace(/^\s*(?:\*\*|\*)?[A-Z][a-zA-Z0-9_ ]+(?:\*\*|\*)?:\s*/gm, '')
               : chunk.text;
             const ttsPrompt = chunk.speakers.length > 1
-              ? `TTS the following conversation between ${chunk.speakers.join(' and ')}:\n\n${cleanedText}`
+              ? `Read this conversation aloud. Use VERY DISTINCT voices for each character — different pitch, accent, pacing, and energy. ${chunk.speakers.join(' and ')} should each sound like a completely different person. Perform it dramatically like a voice actor:\n\n${cleanedText}`
               : cleanedText;
             const res = await fetch(`${adkUrl}/api/tts`, {
               method: 'POST',
@@ -1074,7 +1131,7 @@ GROUNDING: Base your story on internally consistent world-building. Character na
             ? chunk.text.replace(/^\s*(?:\*\*|\*)?[A-Z][a-zA-Z0-9_ ]+(?:\*\*|\*)?:\s*/gm, '')
             : chunk.text;
           const ttsPrompt = chunk.speakers.length > 1
-            ? `TTS the following conversation between ${chunk.speakers.join(' and ')}:\n\n${cleanedText}`
+            ? `Read this conversation aloud. Use VERY DISTINCT voices for each character — different pitch, accent, pacing, and energy. ${chunk.speakers.join(' and ')} should each sound like a completely different person. Perform it dramatically like a voice actor:\n\n${cleanedText}`
             : cleanedText;
           return ai.models.generateContentStream({
             model: "gemini-2.5-pro-preview-tts",
@@ -1124,7 +1181,8 @@ GROUNDING: Base your story on internally consistent world-building. Character na
       const moodPrompt = extractMoodPrompt(storyText);
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 48000 });
       const gainNode = audioCtx.createGain();
-      gainNode.gain.value = 0.12;
+      // Low volume so music doesn't compete with voice narration
+      gainNode.gain.value = 0.08;
       gainNode.connect(audioCtx.destination);
 
       // Track next start time to prevent overlapping buffers (gapless scheduling)
@@ -1204,13 +1262,19 @@ GROUNDING: Base your story on internally consistent world-building. Character na
         // Direct browser connection (requires API key)
         const apiKey = getApiKey();
         if (!apiKey) { showToast('Background music requires an ADK server or API key', 'error'); return; }
-        const ai = new GoogleGenAI({ apiKey: apiKey as string });
-        const session = await (ai as any).live.music.connect({
+        const ai = new GoogleGenAI({ apiKey: apiKey as string, httpOptions: { apiVersion: 'v1alpha' } } as any);
+        const session = await ai.live.music.connect({
           model: 'models/lyria-realtime-exp',
-          callbacks: { onAudioData: (data: { data: string }) => playMusicChunk(data.data) },
+          callbacks: {
+            onmessage: (msg: any) => {
+              const chunk = msg.audioChunk;
+              if (chunk?.data) playMusicChunk(chunk.data);
+            },
+          },
         });
-        await session.setWeightedPrompts([{ text: moodPrompt, weight: 1.0 }]);
-        await session.play();
+        await session.setWeightedPrompts({ weightedPrompts: [{ text: moodPrompt, weight: 1.0 }] } as any);
+        await (session as any).setMusicGenerationConfig({ musicGenerationConfig: { musicGenerationMode: 'QUALITY' } });
+        (session as any).play();
         setMusicSession(session);
       }
     } catch (err) {
@@ -1683,75 +1747,98 @@ GROUNDING: Base your story on internally consistent world-building. Character na
               </motion.div>
             )}
 
-            {/* Story Content — canvas inset */}
-            {storyParts.length > 0 && (
+            {/* Story Content — book-style paginated view */}
+            {storyParts.length > 0 && totalPages > 0 && (
             <div className="story-container">
-              <div className="story-canvas">
-              {storyParts.map((part, idx) => {
-                const imageIndex = part.type === 'image' ? storyParts.slice(0, idx + 1).filter(p => p.type === 'image').length : 0;
-                return (
-                <motion.div key={part.id} initial={{ opacity: 0, y: 40 }} animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: Math.min(idx * 0.08, 0.5), duration: 0.8, ease: [0.16, 1, 0.3, 1] }}>
+              <div className="story-book">
+                {/* Page navigation arrows */}
+                <button className="page-nav page-nav-prev" onClick={() => setCurrentPage(p => Math.max(p - 1, 0))} disabled={safeCurrentPage === 0} aria-label="Previous page">
+                  <ChevronLeftIcon className="w-5 h-5" />
+                </button>
+                <button className="page-nav page-nav-next" onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages - 1))} disabled={safeCurrentPage >= totalPages - 1} aria-label="Next page">
+                  <ChevronRightIcon className="w-5 h-5" />
+                </button>
 
-                  {/* Chapter divider */}
-                  {idx > 0 && <div style={{ width: 32, height: 1, background: 'var(--border-canvas)', margin: '48px auto' }} />}
+                {/* The page itself */}
+                <AnimatePresence mode="wait">
+                <motion.div key={safeCurrentPage} className="story-page"
+                  initial={{ opacity: 0, x: 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -60 }}
+                  transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}>
 
-                  {part.type === 'image' ? (
-                    <div className="image-frame image-letterbox" style={{ margin: '2em -16px' }}>
-                      {part.isLoading ? (
-                        <div className="image-loading"><span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: 'var(--canvas-dim)', display: 'inline-flex' }}><Loader2 className="w-6 h-6 animate-spin" /></span></div>
-                      ) : part.error ? (
-                        <div className="error-banner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: 32 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}><AlertCircle className="w-4 h-4" />{part.error}</div>
-                          {part.prompt && (<button onClick={() => regenerateImage(part.id, part.prompt!)} className="btn-secondary" style={{ fontSize: '0.7rem' }}>Retry</button>)}
-                        </div>
-                      ) : !part.url ? (
-                        <div style={{ aspectRatio: '16/9', background: 'var(--canvas-surface)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 }}>
-                          <p style={{ fontFamily: 'var(--font-display)', fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--canvas-dim)', maxWidth: 400, textAlign: 'center' }}>"{part.prompt}"</p>
-                          <button onClick={() => regenerateImage(part.id, part.prompt!)} className="btn-primary" style={{ fontSize: '0.7rem' }}>Generate</button>
-                        </div>
-                      ) : (
-                        <>
-                          <img src={part.url} alt="" className={`kenburns-${(idx % 4) + 1}`} referrerPolicy="no-referrer" />
-                          <div className="frame-number">FRM {String(imageIndex).padStart(3, '0')}</div>
-                        </>
-                      )}
-                    </div>
-                  ) : (
-                    <div style={{ padding: '24px 0' }}>
-                      <div className="story-text"><ReactMarkdown>{part.text}</ReactMarkdown></div>
-                      <div style={{ marginTop: 24, display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <button id={`play-audio-${part.id}`} onClick={() => playAudio(part.id, part.text)} disabled={part.isLoadingAudio || isGenerating}
-                          className={part.isPlaying ? 'btn-primary' : 'btn-icon'}
-                          style={{ width: 'auto', padding: '8px 16px', gap: 8, display: 'flex', alignItems: 'center', fontSize: '0.7rem', borderRadius: 'var(--radius-md)' }}>
-                          {part.isLoadingAudio ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : part.isPlaying ? <Square className="w-3.5 h-3.5 fill-current" /> : <Play className="w-3.5 h-3.5 fill-current" />}
-                          {part.isLoadingAudio ? 'Generating...' : part.isPlaying ? 'Stop' : 'Listen'}
-                        </button>
-                        {part.isPlaying && (
-                          <div className="waveform-container">
-                            {[1, 2, 3, 4, 5].map(i => (
-                              <motion.div key={i} animate={{ height: ['4px', '18px', '4px'] }}
-                                transition={{ repeat: Infinity, duration: 0.7, delay: i * 0.1 }}
-                                className="waveform-freq-bar" />
-                            ))}
+                  {storyPages[safeCurrentPage]?.map((part, pidx) => {
+                    const globalIdx = storyParts.indexOf(part);
+                    const imageIndex = part.type === 'image' ? storyParts.slice(0, globalIdx + 1).filter(p => p.type === 'image').length : 0;
+                    return (
+                      <div key={part.id}>
+                        {part.type === 'image' ? (
+                          <div className="image-frame image-letterbox" style={{ margin: pidx === 0 ? '0 -16px 1.5em' : '1.5em -16px 0' }}>
+                            {part.isLoading ? (
+                              <div className="image-loading"><span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: 'var(--canvas-dim)', display: 'inline-flex' }}><Loader2 className="w-6 h-6 animate-spin" /></span></div>
+                            ) : part.error ? (
+                              <div className="error-banner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: 32 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}><AlertCircle className="w-4 h-4" />{part.error}</div>
+                                {part.prompt && (<button onClick={() => regenerateImage(part.id, part.prompt!)} className="btn-secondary" style={{ fontSize: '0.7rem' }}>Retry</button>)}
+                              </div>
+                            ) : !part.url ? (
+                              <div style={{ aspectRatio: '16/9', background: 'var(--canvas-surface)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 }}>
+                                <p style={{ fontFamily: 'var(--font-display)', fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--canvas-dim)', maxWidth: 400, textAlign: 'center' }}>"{part.prompt}"</p>
+                                <button onClick={() => regenerateImage(part.id, part.prompt!)} className="btn-primary" style={{ fontSize: '0.7rem' }}>Generate</button>
+                              </div>
+                            ) : (
+                              <>
+                                <img src={part.url} alt="" className={`kenburns-${(globalIdx % 4) + 1}`} referrerPolicy="no-referrer" />
+                                <div className="frame-number">FRM {String(imageIndex).padStart(3, '0')}</div>
+                              </>
+                            )}
+                          </div>
+                        ) : (
+                          <div>
+                            <div className="story-text"><ReactMarkdown>{part.text}</ReactMarkdown></div>
+                            <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
+                              <button id={`play-audio-${part.id}`} onClick={() => playAudio(part.id, part.text)} disabled={part.isLoadingAudio || isGenerating}
+                                className={part.isPlaying ? 'btn-primary' : 'btn-icon'}
+                                style={{ width: 'auto', padding: '8px 16px', gap: 8, display: 'flex', alignItems: 'center', fontSize: '0.7rem', borderRadius: 'var(--radius-md)' }}>
+                                {part.isLoadingAudio ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : part.isPlaying ? <Square className="w-3.5 h-3.5 fill-current" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+                                {part.isLoadingAudio ? 'Generating...' : part.isPlaying ? 'Stop' : 'Listen'}
+                              </button>
+                              {part.isPlaying && (
+                                <div className="waveform-container">
+                                  {[1, 2, 3, 4, 5].map(i => (
+                                    <motion.div key={i} animate={{ height: ['4px', '18px', '4px'] }}
+                                      transition={{ repeat: Infinity, duration: 0.7, delay: i * 0.1 }}
+                                      className="waveform-freq-bar" />
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           </div>
                         )}
                       </div>
-                    </div>
-                  )}
-                </motion.div>
-                );
-              })}
+                    );
+                  })}
 
-              {isGenerating && storyParts.length > 0 && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} style={{ display: 'flex', justifyContent: 'center', padding: '48px 0' }}>
-                  <div className="generating-indicator">
-                    <div className="generating-dot" />
-                    <span>Generating...</span>
-                  </div>
+                  {/* Page number */}
+                  <div className="page-number">{safeCurrentPage + 1} / {totalPages}</div>
                 </motion.div>
-              )}
+                </AnimatePresence>
+
+                {isGenerating && (
+                  <div style={{ position: 'absolute', bottom: 16, left: '50%', transform: 'translateX(-50%)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div className="generating-dot" />
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.65rem', color: 'var(--canvas-dim)' }}>Writing...</span>
+                  </div>
+                )}
               </div>
+
+              {/* Page dots indicator */}
+              {totalPages > 1 && (
+                <div className="page-dots">
+                  {storyPages.map((_, i) => (
+                    <button key={i} className={`page-dot ${i === safeCurrentPage ? 'active' : ''}`}
+                      onClick={() => setCurrentPage(i)} aria-label={`Go to page ${i + 1}`} />
+                  ))}
+                </div>
+              )}
             </div>
             )}
 
@@ -1812,7 +1899,7 @@ GROUNDING: Base your story on internally consistent world-building. Character na
                   </div>
                 )}
 
-                <button id="new-story-btn" onClick={() => { setStoryParts([]); setPrompt(''); setReview(''); setAgentActivity([]); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
+                <button id="new-story-btn" onClick={() => { setStoryParts([]); setCurrentPage(0); setPrompt(''); setReview(''); setAgentActivity([]); window.scrollTo({ top: 0, behavior: 'smooth' }); }}
                   className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   New Story
                 </button>
