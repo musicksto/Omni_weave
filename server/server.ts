@@ -308,7 +308,7 @@ app.post('/api/tts', async (req, res) => {
 });
 
 // Music streaming — Lyria RealTime proxy (keeps API key server-side)
-// Lyria requires Google AI Studio API key (not Vertex AI)
+// Lyria requires Google AI Studio API key (not Vertex AI) + v1alpha API version
 app.post('/api/music', async (req, res) => {
   const { mood } = req.body;
   if (!mood) return res.status(400).json({ error: 'mood is required' });
@@ -325,22 +325,36 @@ app.post('/api/music', async (req, res) => {
 
   try {
     let gotAudio = false;
-    // Lyria requires API key mode — explicitly disable Vertex AI
-    const ai = new GoogleGenAI({ apiKey, vertexai: false } as any);
-    const session = await (ai as any).live.music.connect({
+    // Lyria requires API key mode with v1alpha API version
+    const ai = new GoogleGenAI({
+      apiKey,
+      vertexai: false,
+      httpOptions: { apiVersion: 'v1alpha' },
+    } as any);
+
+    const session = await ai.live.music.connect({
       model: 'models/lyria-realtime-exp',
       callbacks: {
-        onAudioData: (data: { data: string }) => {
-          gotAudio = true;
-          if (!res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ audio: data.data })}\n\n`);
+        onmessage: (msg: any) => {
+          const chunk = msg.audioChunk;
+          if (chunk?.data) {
+            gotAudio = true;
+            if (!res.writableEnded) {
+              res.write(`data: ${JSON.stringify({ audio: chunk.data })}\n\n`);
+            }
+          }
+          if (msg.filteredPrompt) {
+            console.warn('[Lyria] Prompt filtered:', msg.filteredPrompt);
           }
         },
       },
     });
 
-    await session.setWeightedPrompts([{ text: mood, weight: 1.0 }]);
-    await session.play();
+    await session.setWeightedPrompts({ weightedPrompts: [{ text: mood, weight: 1.0 }] });
+    await session.setMusicGenerationConfig({
+      musicGenerationConfig: { musicGenerationMode: 'QUALITY' as any },
+    });
+    session.play();
 
     // If no audio arrives within 15s, close the stream
     const startupTimeout = setTimeout(() => {
@@ -352,18 +366,19 @@ app.post('/api/music', async (req, res) => {
       }
     }, 15000);
 
-    const timeout = setTimeout(async () => {
+    const timeout = setTimeout(() => {
       clearTimeout(startupTimeout);
-      try { await session.pause(); } catch { /* ignore */ }
+      try { session.pause(); } catch { /* ignore */ }
       if (!res.writableEnded) {
         res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
         res.end();
       }
     }, 60000);
 
-    req.on('close', async () => {
+    req.on('close', () => {
       clearTimeout(timeout);
-      try { await session.pause(); } catch { /* ignore */ }
+      clearTimeout(startupTimeout);
+      try { session.pause(); } catch { /* ignore */ }
     });
   } catch (err: any) {
     console.warn('Lyria RealTime not available:', err.message);
