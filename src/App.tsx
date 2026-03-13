@@ -13,7 +13,8 @@ import { createStoryStreamState, appendStoryChunk, flushStoryChunk } from './sto
 
 type StoryPart = 
   | { type: 'text', text: string, id: string, audioUrl?: string, audioBase64?: string, isPlaying?: boolean, isLoadingAudio?: boolean }
-  | { type: 'image', url: string, id: string, isLoading?: boolean, prompt?: string, error?: string };
+  | { type: 'image', url: string, id: string, isLoading?: boolean, prompt?: string, error?: string }
+  | { type: 'video', url: string, id: string, prompt?: string, error?: string };
 
 function createWavFile(pcmBase64: string, sampleRate: number = 24000): string {
   const binary = atob(pcmBase64);
@@ -378,7 +379,7 @@ export default function App() {
   const [isLiveConnecting, setIsLiveConnecting] = useState(false);
   const [isLiveConnected, setIsLiveConnected] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [liveTranscript, setLiveTranscript] = useState<Array<{ role: string; text: string; image?: string }>>([]);
+  const [liveTranscript, setLiveTranscript] = useState<Array<{ role: string; text: string; image?: string; video?: string }>>([]);
   const [liveToolStatus, setLiveToolStatus] = useState('');
   const liveClientRef = useRef<ReturnType<typeof createLiveClient> | null>(null);
   const liveTranscriptEndRef = useRef<HTMLDivElement>(null);
@@ -408,7 +409,7 @@ export default function App() {
       onText: (text) => {
         setLiveTranscript(prev => {
           const last = prev[prev.length - 1];
-          if (last?.role === 'assistant' && !last.image) {
+          if (last?.role === 'assistant' && !last.image && !last.video) {
             return [...prev.slice(0, -1), { ...last, text: last.text + text }];
           }
           return [...prev, { role: 'assistant', text }];
@@ -418,6 +419,10 @@ export default function App() {
       onAudio: () => { /* Audio playback handled by liveClient internally */ },
       onImage: (dataUri) => {
         setLiveTranscript(prev => [...prev, { role: 'image', text: '', image: dataUri }]);
+        setLiveToolStatus('');
+      },
+      onVideo: (videoUrl) => {
+        setLiveTranscript(prev => [...prev, { role: 'video', text: '', video: videoUrl }]);
         setLiveToolStatus('');
       },
       onToolCall: (toolName, message) => {
@@ -1584,6 +1589,10 @@ GROUNDING: Base your story on internally consistent world-building. Character na
                           <div className="image-frame" style={{ margin: '8px 0' }}>
                             <img src={entry.image} alt="" style={{ width: '100%', borderRadius: 'var(--radius-md)' }} />
                           </div>
+                        ) : entry.role === 'video' && entry.video ? (
+                          <div className="video-frame" style={{ margin: '8px 0' }}>
+                            <video src={entry.video} autoPlay loop muted playsInline style={{ width: '100%', borderRadius: 'var(--radius-md)' }} />
+                          </div>
                         ) : entry.role === 'error' ? (
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem' }}>
                             <AlertCircle className="w-3.5 h-3.5" /> {entry.text}
@@ -1664,6 +1673,9 @@ GROUNDING: Base your story on internally consistent world-building. Character na
                           .map((e, i) => {
                             if (e.role === 'image' && e.image) {
                               return { type: 'image' as const, url: e.image, id: `live-img-${i}` };
+                            }
+                            if (e.role === 'video' && e.video) {
+                              return { type: 'video' as const, url: e.video, id: `live-vid-${i}` };
                             }
                             return { type: 'text' as const, text: e.text, id: `live-text-${i}` };
                           });
@@ -1770,7 +1782,25 @@ GROUNDING: Base your story on internally consistent world-building. Character na
                     const imageIndex = part.type === 'image' ? storyParts.slice(0, globalIdx + 1).filter(p => p.type === 'image').length : 0;
                     return (
                       <div key={part.id}>
-                        {part.type === 'image' ? (
+                        {part.type === 'video' ? (
+                          <div className="image-frame image-letterbox" style={{ margin: pidx === 0 ? '0 -16px 1.5em' : '1.5em -16px 0' }}>
+                            {part.error ? (
+                              <div className="error-banner" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: 32 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}><AlertCircle className="w-4 h-4" />{part.error}</div>
+                              </div>
+                            ) : !part.url ? (
+                              <div style={{ aspectRatio: '16/9', background: 'var(--canvas-surface)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 }}>
+                                <span style={{ color: 'var(--canvas-dim)', display: 'inline-flex' }}><Loader2 className="w-6 h-6 animate-spin" /></span>
+                                <p style={{ fontFamily: 'var(--font-display)', fontSize: '0.85rem', fontStyle: 'italic', color: 'var(--canvas-dim)', maxWidth: 400, textAlign: 'center' }}>Generating Video: "{part.prompt}"</p>
+                              </div>
+                            ) : (
+                              <>
+                                <video src={part.url} autoPlay loop muted playsInline className={`kenburns-${(globalIdx % 4) + 1}`} style={{ width: '100%', objectFit: 'cover', borderRadius: 'var(--radius-md)' }} />
+                                <div className="frame-number">VID {String(globalIdx).padStart(3, '0')}</div>
+                              </>
+                            )}
+                          </div>
+                        ) : part.type === 'image' ? (
                           <div className="image-frame image-letterbox" style={{ margin: pidx === 0 ? '0 -16px 1.5em' : '1.5em -16px 0' }}>
                             {part.isLoading ? (
                               <div className="image-loading"><span style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%,-50%)', color: 'var(--canvas-dim)', display: 'inline-flex' }}><Loader2 className="w-6 h-6 animate-spin" /></span></div>

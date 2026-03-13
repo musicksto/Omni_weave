@@ -10,6 +10,7 @@ export interface LiveCallbacks {
   onText: (text: string) => void;
   onAudio: (base64: string, mimeType: string) => void;
   onImage: (dataUri: string) => void;
+  onVideo: (videoUrl: string) => void;
   onToolCall: (toolName: string, message: string) => void;
   onTurnComplete: () => void;
   onError: (message: string) => void;
@@ -133,6 +134,10 @@ export function createLiveClient(serverUrl: string, callbacks: LiveCallbacks) {
 
         case 'image':
           if (msg.data) callbacks.onImage(msg.data);
+          break;
+
+        case 'video':
+          if (msg.data) callbacks.onVideo(msg.data);
           break;
 
         case 'tool_call':

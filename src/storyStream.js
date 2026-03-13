@@ -38,6 +38,17 @@ const appendImagePart = (state, newParts, prompt) => {
   newParts.push(part);
 };
 
+const appendVideoPart = (state, newParts, prompt) => {
+  const part = {
+    type: 'video',
+    url: '',
+    id: `vid-${state.nextPartIndex++}`,
+    prompt,
+  };
+  state.parts.push(part);
+  newParts.push(part);
+};
+
 const stripCharacterSheet = (text) => {
   // Remove the ---CHARACTER SHEET--- ... ---END CHARACTER SHEET--- block (internal metadata, not for display)
   const pattern = /---CHARACTER SHEET---[\s\S]*?---END CHARACTER SHEET---\s*/gi;
@@ -55,17 +66,25 @@ const processText = (state, sourceText, newParts) => {
   let cleanText = stripCharacterSheet(sourceText);
   cleanText = stripReviewHeader(cleanText);
 
-  const imagePattern = /\[IMAGE:\s*(.*?)\s*\]/g;
+  const mediaPattern = /\[(IMAGE|VIDEO):\s*(.*?)\s*\]/gi;
   let lastIndex = 0;
   let match;
 
-  while ((match = imagePattern.exec(cleanText)) !== null) {
+  while ((match = mediaPattern.exec(cleanText)) !== null) {
     if (match.index > lastIndex) {
       appendTextPart(state, newParts, cleanText.slice(lastIndex, match.index));
     }
 
-    appendImagePart(state, newParts, match[1]);
-    lastIndex = imagePattern.lastIndex;
+    const type = match[1].toUpperCase();
+    const prompt = match[2];
+
+    if (type === 'VIDEO') {
+      appendVideoPart(state, newParts, prompt);
+    } else {
+      appendImagePart(state, newParts, prompt);
+    }
+    
+    lastIndex = mediaPattern.lastIndex;
   }
 
   if (lastIndex < cleanText.length) {

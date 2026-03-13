@@ -20,7 +20,7 @@ interface ClientMessage {
 
 /** Message types sent TO the browser client */
 interface ServerOutMessage {
-  type: 'audio' | 'text' | 'image' | 'tool_call' | 'turn_complete' | 'error' | 'connected';
+  type: 'audio' | 'text' | 'image' | 'video' | 'tool_call' | 'turn_complete' | 'error' | 'connected';
   data?: string;
   text?: string;
   mimeType?: string;
@@ -207,6 +207,12 @@ async function handleToolCalls(
         if (toolName === 'generate_image' && result.imageDataUri) {
           sendToClient(clientWs, { type: 'image', data: result.imageDataUri });
           conversationHistory.push({ role: 'tool', content: `[Image: ${args.prompt}]`, image: result.imageDataUri });
+        }
+        
+        // If it's a video, send the URL to the client for display
+        if (toolName === 'generate_video' && result.videoUrl) {
+          sendToClient(clientWs, { type: 'video', data: result.videoUrl });
+          conversationHistory.push({ role: 'tool', content: `[Video: ${args.prompt}]` });
         }
 
         return { name: toolName, response: result };

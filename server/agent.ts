@@ -2,6 +2,10 @@ import 'dotenv/config';
 import { LlmAgent, SequentialAgent, FunctionTool } from '@google/adk';
 import { GoogleGenAI, Modality, Type } from '@google/genai';
 import { z } from 'zod';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { fileURLToPath } from 'url';
+import path from 'path';
 
 export const ROOT_AGENT_MODEL = 'gemini-3-flash-preview';
 export const STORY_WRITER_MODEL = 'gemini-3.1-pro-preview';
@@ -48,6 +52,45 @@ export const getAI = () => {
 
 const IMAGE_NEGATIVE_PROMPT =
   ' Do not include any text, watermarks, logos, UI elements, or written words in the image.';
+
+let mcpClient: Client | null = null;
+async function getMcpClient() {
+  if (mcpClient) return mcpClient;
+  const __dirname = path.dirname(fileURLToPath(import.meta.url));
+  const serverPath = path.join(__dirname, 'mediaMcpServer.ts');
+  const transport = new StdioClientTransport({
+    command: 'npx',
+    args: ['tsx', serverPath]
+  });
+  mcpClient = new Client({ name: 'OmniWeaveClient', version: '1.0.0' }, { capabilities: {} });
+  await mcpClient.connect(transport);
+  return mcpClient;
+}
+
+export const generateVideoTool = new FunctionTool({
+  name: 'generate_video',
+  description:
+    'Generates a short animated video from a detailed text prompt using Veo 3.1 via MCP. ' +
+    'Returns a Google Cloud Storage URI. Use this when the story needs an immersive animated sequence instead of a static image.',
+  parameters: z.object({
+    prompt: z.string().describe('A detailed prompt describing the video scene, lighting, camera movement, and characters.')
+  }),
+  execute: async ({ prompt }) => {
+    try {
+      const client = await getMcpClient();
+      const result = await client.callTool({
+        name: 'generate_video',
+        arguments: { prompt }
+      });
+      if (result.isError) {
+        return { status: 'error', error: (((result as any).content as any[])?.[0])?.text };
+      }
+      return JSON.parse((((result as any).content as any[])?.[0])?.text || '{}');
+    } catch (err: any) {
+      return { status: 'error', error: err.message || 'Video generation failed' };
+    }
+  }
+});
 
 export const generateImageTool = new FunctionTool({
   name: 'generate_image',
@@ -249,9 +292,26 @@ async function execGenerateMusic(args: any) {
   return { status: 'success', model: 'lyria-realtime-exp', prompt: args.mood || '' };
 }
 
+async function execGenerateVideo(args: any) {
+  try {
+    const client = await getMcpClient();
+    const result = await client.callTool({
+      name: 'generate_video',
+      arguments: { prompt: args.prompt }
+    });
+    if (result.isError) {
+      return { status: 'error', error: (((result as any).content as any[])?.[0])?.text };
+    }
+    return JSON.parse((((result as any).content as any[])?.[0])?.text || '{}');
+  } catch (err: any) {
+    return { status: 'error', error: err.message || 'Video generation failed' };
+  }
+}
+
 export const liveToolExecutors: Record<string, (args: any) => Promise<any>> = {
   generate_image: execGenerateImage,
   generate_music: execGenerateMusic,
+  generate_video: execGenerateVideo,
 };
 
 /** Tool declarations for the Live API config */
@@ -275,8 +335,18 @@ const musicDecl = {
   },
 };
 
+const videoDecl = {
+  name: 'generate_video',
+  description: 'Generates a short animated video from a detailed text prompt using Veo 3.1 via MCP.',
+  parameters: {
+    type: Type.OBJECT,
+    properties: { prompt: { type: Type.STRING, description: 'Detailed prompt for video scene, lighting, camera motion.' } } as Record<string, any>,
+    required: ['prompt'],
+  },
+};
+
 export const liveToolDeclarations: any[] = [
-  { functionDeclarations: [imageDecl, musicDecl] },
+  { functionDeclarations: [imageDecl, musicDecl, videoDecl] },
 ];
 
 const storyWriterAgent = new LlmAgent({
@@ -375,7 +445,7 @@ When a user gives you a story prompt:
 4. Use tools only when the caller explicitly needs server-side multimodal production steps.
 5. Return the final reviewed script with [IMAGE:] markers unchanged when asked for story output.
 
-You are the conductor of a multimodal orchestra — text, image, and voice working in harmony.`,
-  tools: [generateImageTool, generateSpeechTool, computeEmbeddingTool, generateMusicTool],
+You are the conductor of a multimodal orchestra — text, image, video, and voice working in harmony.`,
+  tools: [generateImageTool, generateSpeechTool, computeEmbeddingTool, generateMusicTool, generateVideoTool],
   subAgents: [storyPipeline],
 });
