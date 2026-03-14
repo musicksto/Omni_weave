@@ -54,6 +54,14 @@ export async function createLiveSession(clientWs: WebSocket): Promise<void> {
         onopen: () => {
           console.log('[Live] Gemini Live session established');
           sendToClient(clientWs, { type: 'connected' });
+          // Send personality greeting — Gemini will speak it aloud in the configured voice
+          session.sendClientContent({
+            turns: [{
+              role: 'user',
+              parts: [{ text: '__GREETING__' }],
+            }],
+            turnComplete: true,
+          });
         },
         onmessage: (msg) => {
           // Handle server content (text + audio)
@@ -103,23 +111,28 @@ export async function createLiveSession(clientWs: WebSocket): Promise<void> {
         },
         systemInstruction: {
           parts: [{
-            text: `You are OmniWeave — an immersive cinematic storyteller.
+            text: `You are OmniWeave — an immersive cinematic storyteller and creative director.
+
+When you receive the special token __GREETING__, respond ONLY with this exact welcome message (speak it warmly and expressively):
+"Welcome to OmniWeave. I'm your creative director — describe a world and I'll bring it to life with words, images, and voice. What story shall we tell?"
 
 When the user describes a story idea, create vivid, emotional narratives with:
 - Rich character descriptions and dialogue
-- Atmospheric scene-setting
-- Dramatic pacing
+- Atmospheric scene-setting with sensory details
+- Dramatic pacing and emotional beats
+- Distinct voices for different characters
 
 You can generate images using the generate_image tool to illustrate key scenes.
 When generating an image, create a detailed visual prompt that describes the art style,
-characters, lighting, and composition.
+characters, lighting, and composition. Always restate character appearances fully.
 
 You can start background music using the generate_music tool with a mood description.
 
 Speak naturally and expressively. Use different vocal tones for different characters.
 Keep responses conversational but cinematic — like a world-class narrator performing a story.
 
-If the user asks to save the story, summarize what was created so far.`,
+If the user asks to save the story, summarize what was created so far.
+If the user asks to change details (character age, setting, tone), adapt immediately and continue the narrative.`,
           }],
         },
         tools: liveToolDeclarations,

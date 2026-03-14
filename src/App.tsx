@@ -372,6 +372,7 @@ export default function App() {
   const [showLibrary, setShowLibrary] = useState(false);
 
   const [adkAvailable, setAdkAvailable] = useState(false);
+  const [adkServerConfigured, setAdkServerConfigured] = useState(false);
   const [agentActivity, setAgentActivity] = useState<string[]>([]);
 
   // --- Live Mode State ---
@@ -526,11 +527,13 @@ export default function App() {
   }, [storyParts.length, showLibrary]);
 
   useEffect(() => {
+    const serverUrl = getADKServerURL();
+    if (serverUrl) setAdkServerConfigured(true);
     (async () => {
       const result = await checkADKServer();
       setAdkAvailable(result.available);
       if (result.available) {
-        console.log('🧵 ADK Agent Server connected:', getADKServerURL());
+        console.log('🧵 ADK Agent Server connected:', serverUrl);
         console.log('   Agent:', result.agentInfo?.rootAgent?.name);
       }
     })();
@@ -1417,20 +1420,27 @@ GROUNDING: Base your story on internally consistent world-building. Character na
                       <div className="prompt-actions">
                         <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.6rem', color: 'var(--frame-dim)', letterSpacing: '0.06em' }}>Ctrl+Enter</span>
                         <div style={{ display: 'flex', gap: 10 }}>
-                          {adkAvailable && (
-                            <button onClick={startLiveMode} disabled={isLiveConnecting}
-                              className="btn-live" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                              {isLiveConnecting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <><span className="live-dot" /><LiveIcon className="w-3.5 h-3.5" /></>}
+                          {adkServerConfigured && (
+                            <button onClick={startLiveMode} disabled={isLiveConnecting || isGenerating}
+                              className="btn-live" style={{ display: 'flex', alignItems: 'center', gap: 10 }}
+                              title={adkAvailable ? 'Start Live voice session' : 'ADK server connecting...'}>
+                              {isLiveConnecting
+                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                : <><span className={adkAvailable ? 'live-dot' : ''} style={!adkAvailable ? { width: 6, height: 6, borderRadius: '50%', background: 'var(--frame-dim)' } : {}} /><LiveIcon className="w-3.5 h-3.5" /></>
+                              }
                               Live
                             </button>
                           )}
                           <button id="generate-btn" onClick={generateStory} disabled={!prompt.trim() || isGenerating}
                             className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                            Compose <ArrowRight className="w-3.5 h-3.5" />
+                            {isGenerating
+                              ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Composing...</>
+                              : <>Compose <ArrowRight className="w-3.5 h-3.5" /></>
+                            }
                           </button>
                         </div>
                       </div>
-                      {adkAvailable && (
+                      {adkServerConfigured && (
                         <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8, gap: 24 }}>
                           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.55rem', color: 'var(--frame-dim)', letterSpacing: '0.06em' }}>
                             LIVE — speak &amp; interact in real time

@@ -130,6 +130,8 @@ Notes:
 
 ### Deploy to Google Cloud
 
+#### Option A — One-command shell script (recommended)
+
 ```bash
 export GCP_PROJECT_ID="your-project-id"
 export GOOGLE_API_KEY="your-key"
@@ -137,7 +139,23 @@ chmod +x deploy-all.sh
 ./deploy-all.sh
 ```
 
-`deploy-all.sh` handles: Cloud Run deployment (Docker build → Artifact Registry → Cloud Run), Firebase Hosting, and maps the API key to ADK-compatible runtime env vars.
+`deploy-all.sh` handles: Cloud Run deployment (Docker build → Artifact Registry → Cloud Run), Firebase Hosting, and maps the API key to ADK-compatible runtime env vars. The backend URL is retrieved dynamically via `gcloud run services describe` — no hardcoding needed.
+
+#### Option B — Terraform infrastructure-as-code
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+# Fill in project_id and google_api_key
+terraform init
+terraform apply
+```
+
+The `terraform/` directory provisions all Google Cloud resources via IaC: Artifact Registry, Cloud Run, IAM roles (Vertex AI + Firestore), Firestore database, and Cloud Build trigger. See [terraform/README.md](terraform/README.md) for full details.
+
+#### Option C — Cloud Build CI/CD
+
+Triggered automatically on every push to `main` via `cloudbuild.yaml` (6-step pipeline: build → push → deploy Cloud Run → install → build frontend → deploy Hosting).
 
 See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for detailed instructions.
 
@@ -157,12 +175,18 @@ omniweave/
 ├── server/                 # ADK agent backend (Cloud Run)
 │   ├── agent.ts            # Multi-agent definition (3 agents + 4 tools)
 │   ├── server.ts           # Express API server (REST + SSE + WebSocket)
-│   ├── liveSession.ts      # Live API WebSocket proxy
+│   ├── liveSession.ts      # Live API WebSocket proxy (with personality greeting)
 │   ├── Dockerfile          # Cloud Run container
+│   ├── architecture-adk.svg # System architecture diagram (all 8 models)
 │   └── deploy.sh           # Server deployment script
+├── terraform/              # Infrastructure-as-Code (Terraform)
+│   ├── main.tf             # Cloud Run, Artifact Registry, Firestore, IAM
+│   ├── variables.tf        # Input variables
+│   ├── outputs.tf          # Output values (Cloud Run URL, etc.)
+│   └── terraform.tfvars.example  # Variable template
 ├── firestore.rules         # Firestore security rules
 ├── firebase.json           # Firebase Hosting config
-├── cloudbuild.yaml         # CI/CD pipeline (infra-as-code)
+├── cloudbuild.yaml         # CI/CD pipeline (Cloud Build)
 ├── deploy-all.sh           # One-command full-stack deployment
 └── DEPLOYMENT_GUIDE.md     # Deployment + proof instructions
 ```

@@ -86,9 +86,31 @@ gcloud run deploy "${SERVICE_NAME}" \
   --set-env-vars "${ENV_VARS}" \
   --quiet
 
-BACKEND_URL="https://omniweave-adk-dvrl3ikvnq-uc.a.run.app"
+# Dynamically retrieve the deployed service URL
+BACKEND_URL=$(gcloud run services describe "${SERVICE_NAME}" \
+  --region "${REGION}" \
+  --format="value(status.url)" 2>/dev/null)
+
+if [ -z "${BACKEND_URL}" ]; then
+  echo "⚠️  Could not retrieve Cloud Run URL automatically — using fallback"
+  BACKEND_URL="https://${SERVICE_NAME}-$(gcloud projects describe "${PROJECT_ID}" --format="value(projectNumber)").${REGION}.run.app"
+fi
 
 echo "✅ Backend deployed: ${BACKEND_URL}"
+
+# Verify backend health before continuing
+echo "→ Verifying backend health..."
+for i in 1 2 3; do
+  HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${BACKEND_URL}/" 2>/dev/null || echo "000")
+  if [ "${HEALTH_STATUS}" = "200" ]; then
+    echo "✅ Backend health check passed"
+    break
+  else
+    echo "   Attempt ${i}/3 — HTTP ${HEALTH_STATUS}, retrying in 5s..."
+    sleep 5
+  fi
+done
+
 cd ..
 echo ""
 
