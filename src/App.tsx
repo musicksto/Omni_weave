@@ -457,7 +457,7 @@ export default function App() {
                 isAutoPlaying={isAutoPlaying}
                 musicEnabled={musicEnabled}
                 storyTitle={prompt}
-                onPageChange={setCurrentPage}
+                onPageChange={(page: number) => { if (isAutoPlaying) stopAutoPlay(); setCurrentPage(page); }}
                 onPlayAudio={playAudio}
                 onRegenerateImage={regenerateImage}
                 onToggleAutoPlay={isAutoPlaying ? stopAutoPlay : startAutoPlay}

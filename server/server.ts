@@ -551,7 +551,7 @@ ${script}`
       if (!res.headersSent) {
         res.status(500).json({ status: 'error', error: cloudErr.message });
       } else {
-        res.write(`data: ${JSON.stringify({ error: geminiErr.message })}\n\n`);
+        res.write(`data: ${JSON.stringify({ error: cloudErr.message })}\n\n`);
         res.end();
       }
     }
