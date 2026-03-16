@@ -1,0 +1,10 @@
+# OmniWeave Terraform variable values
+# Copy to terraform.tfvars and fill in your values
+# NEVER commit terraform.tfvars with real credentials
+
+project_id         = "your-gcp-project-id"          # e.g. gen-lang-client-0001923421
+region             = "us-central1"
+firestore_location = "nam5"
+google_api_key     = "your-google-ai-studio-api-key" # From https://aistudio.google.com/
+github_owner       = "musicksto"
+github_repo        = "Omni_weave"
