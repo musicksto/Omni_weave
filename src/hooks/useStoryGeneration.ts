@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { generateImageViaADK, generateVideoViaADK, computeEmbeddingViaADK, generateStoryViaADK } from '../adkClient';
+import { generateImageViaADK, generateVideoViaADK, computeEmbeddingViaADK, generateStoryViaADK, getADKServerURL } from '../adkClient';
 import { createStoryStreamState, appendStoryChunk, appendInlineImageChunk, flushStoryChunk, extractCharacterSheet } from '../storyStream.js';
 import type { StoryPart } from '../types';
 
@@ -223,7 +223,73 @@ export function useStoryGeneration({
       }
 
       finalizeStoryText();
-      
+
+      const prefetchAllTTS = (async () => {
+        try {
+          if (!adkAvailable) return;
+          const textParts = streamState.parts.filter(p => p.type === 'text');
+          if (textParts.length === 0) return;
+          const adkUrl = getADKServerURL();
+          const { createWavFile } = await import('../utils/audio');
+
+          const fetchOneTTS = async (part: typeof textParts[0], idx: number) => {
+            try {
+              if (part.type !== 'text') return;
+              const cleaned = part.text
+                .replace(/---CHARACTER SHEET---[\s\S]*?---END CHARACTER SHEET---/gi, '')
+                .replace(/\[REVIEW:\s*(?:PASS|FIXED[^\]]*)\]/gi, '')
+                .replace(/\*\*(.*?)\*\*/g, '$1')
+                .replace(/\*(.*?)\*/g, '$1')
+                .replace(/\[IMAGE:.*?\]/g, '')
+                .replace(/\[VIDEO:.*?\]/g, '')
+                .replace(/\n{3,}/g, '\n\n')
+                .trim();
+              if (!cleaned || cleaned.length < 20) return;
+              const speakerSet = new Set<string>();
+              const spkRegex = /^\s*(?:\*\*|\*)?([A-Z][a-zA-Z0-9_ ]+)(?:\*\*|\*)?:/gm;
+              let spkMatch;
+              while ((spkMatch = spkRegex.exec(cleaned)) !== null) speakerSet.add(spkMatch[1].trim());
+              if (speakerSet.size === 0) speakerSet.add('Narrator');
+              const speakers = Array.from(speakerSet).slice(0, 2).map(name => ({
+                name,
+                voice: name === 'Narrator' ? 'Zephyr' : 'Puck',
+              }));
+              const res = await fetch(`${adkUrl}/api/tts`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ script: cleaned, speakers }),
+              });
+              if (!res.ok || !res.body) return;
+              const reader = res.body.getReader();
+              const decoder = new TextDecoder();
+              let buf = '', binary = '';
+              while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buf += decoder.decode(value, { stream: true });
+                const lines = buf.split('\n');
+                buf = lines.pop() || '';
+                for (const ln of lines) {
+                  if (!ln.startsWith('data: ')) continue;
+                  try {
+                    const evt = JSON.parse(ln.slice(6));
+                    if (evt.done || evt.error) return;
+                    if (evt.audio) binary += atob(evt.audio);
+                  } catch {}
+                }
+              }
+              if (binary.length > 0) {
+                const wavUrl = createWavFile(btoa(binary), 24000);
+                setStoryParts(prev => prev.map(p => p.id === part.id ? { ...p, audioUrl: wavUrl, audioBase64: btoa(binary) } : p));
+                addAgentActivity(`Scene ${idx + 1} narration cached`);
+              }
+            } catch {}
+          };
+
+          await Promise.allSettled(textParts.map((p, i) => fetchOneTTS(p, i)));
+        } catch {}
+      })();
+
       const charSheetMatch = rawTextRef.current.match(/---CHARACTER SHEET---\s*([\s\S]*?)\s*---END CHARACTER SHEET---/i);
       const characterSheetRaw = charSheetMatch ? charSheetMatch[1].trim() : undefined;
       const imageSessionId = `story-${Date.now()}`;

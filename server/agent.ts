@@ -507,7 +507,7 @@ CharacterB: [dialogue in contrasting voice]
 - **5 scenes, 5 [IMAGE:] markers** — one image per scene, no exceptions
 - **Speaker labels on EVERY line**: "Narrator:", "CharacterName:" — no unlabeled text
 - **Characters have CONTRASTING voices**: one formal, one casual; one verbose, one terse; different verbal tics
-- **Image prompts are SELF-CONTAINED**: every [IMAGE:] restates art style + setting + full character appearance from the CHARACTER SHEET. An image generator with zero memory must produce consistent visuals
+- **Image prompts are SELF-CONTAINED**: every [IMAGE:] MUST copy-paste the EXACT hair color/style, eye color, outfit colors, and distinguishing features from the CHARACTER SHEET word-for-word. An image generator with zero memory must produce visually identical characters across all 5 scenes. Never paraphrase — use the same adjectives every time
 - **Setting continuity**: same world, same color palette, same weather across all 5 images. New locations described relative to the established setting
 - **Emotional arc**: setup → tension → climax → resolution → coda
 

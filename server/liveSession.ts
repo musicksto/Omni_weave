@@ -11,7 +11,7 @@ import { LIVE_MODEL, liveToolExecutors, liveToolDeclarations } from './agent.js'
 
 /** Message types sent FROM the browser client */
 interface ClientMessage {
-  type: 'audio' | 'text' | 'end_audio';
+  type: 'audio' | 'text' | 'end_audio' | 'ping';
   /** Base64-encoded PCM audio (16kHz, 16-bit, mono) */
   data?: string;
   /** Text message for non-voice input */
@@ -20,7 +20,7 @@ interface ClientMessage {
 
 /** Message types sent TO the browser client */
 interface ServerOutMessage {
-  type: 'audio' | 'text' | 'image' | 'video' | 'tool_call' | 'turn_complete' | 'error' | 'connected' | 'session_token' | 'interrupted';
+  type: 'audio' | 'text' | 'image' | 'video' | 'tool_call' | 'turn_complete' | 'error' | 'connected' | 'session_token' | 'interrupted' | 'user_speech' | 'pong';
   data?: string;
   text?: string;
   token?: string;

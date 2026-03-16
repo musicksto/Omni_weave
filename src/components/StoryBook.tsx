@@ -325,8 +325,17 @@ export default function StoryBook({
                 {isCoverPage ? 'Cover' : `Scene ${safeCurrentPage} of ${totalPages - 1}`}
               </span>
               {isAutoPlaying && textPart?.type === 'text' && textPart.isLoadingAudio && (
-                <span className="media-status">
-                  <Loader2 className="w-3 h-3 animate-spin" /> Loading narration...
+                <span className="media-status media-status-loading">
+                  <span className="media-waveform">
+                    {[1,2,3,4,5].map(i => (
+                      <motion.span key={i}
+                        animate={{ height: ['2px', '8px', '2px'] }}
+                        transition={{ repeat: Infinity, duration: 0.8, delay: i * 0.1 }}
+                        className="media-wave-bar"
+                      />
+                    ))}
+                  </span>
+                  Preparing voices...
                 </span>
               )}
               {isAutoPlaying && textPart?.type === 'text' && textPart.isPlaying && (
